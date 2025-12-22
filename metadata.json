@@ -1,0 +1,7 @@
+{
+  "name": "H2 Brasil - Monitoramento Logístico",
+  "description": "Sistema de gestão de entregas e monitoramento em tempo real para a H2 Brasil Distribuidora, focado em UBS e CRAS de Itajaí.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
