@@ -7,24 +7,22 @@ import {
     onSnapshot, 
     query, 
     getDocs,
-    writeBatch
+    writeBatch,
+    deleteDoc
 } from 'firebase/firestore';
 import { DeliveryLocation, DriverState } from '../types';
 import { LOCATIONS_DB, MOCK_DRIVERS_LIST } from '../constants';
 
-// Collection References
 const DRIVERS_COLLECTION = 'drivers';
 const LOCATIONS_COLLECTION = 'locations';
+const INACTIVITY_THRESHOLD = 4 * 24 * 60 * 60 * 1000; // 4 Dias em ms
 
 // --- INITIALIZATION ---
-
 export const seedDatabaseIfEmpty = async () => {
     if (!isConfigured) return;
-
     try {
         const locationsSnap = await getDocs(collection(db, LOCATIONS_COLLECTION));
         if (locationsSnap.empty) {
-            console.log("Seeding Database with Initial Locations...");
             const batch = writeBatch(db);
             LOCATIONS_DB.forEach(loc => {
                 const docRef = doc(db, LOCATIONS_COLLECTION, loc.id);
@@ -32,31 +30,39 @@ export const seedDatabaseIfEmpty = async () => {
             });
             await batch.commit();
         }
-        
-        // We don't necessarily need to seed drivers as they "log in", 
-        // but we can ensure the structure exists.
     } catch (e) {
         console.error("Error seeding DB:", e);
     }
 };
 
 // --- DRIVERS ---
-
 export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) => {
     if (!isConfigured) {
-        // Fallback for demo without keys
         callback(MOCK_DRIVERS_LIST);
         return () => {};
     }
 
     const q = query(collection(db, DRIVERS_COLLECTION));
-    return onSnapshot(q, (snapshot) => {
-        const drivers: DriverState[] = [];
-        snapshot.forEach((doc) => {
-            drivers.push(doc.data() as DriverState);
-        });
-        callback(drivers);
-    });
+    return onSnapshot(q, 
+        (snapshot) => {
+            const now = Date.now();
+            const drivers: DriverState[] = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data() as DriverState;
+                // Só adiciona se estiver ativo nos últimos 4 dias
+                if (!data.lastSeen || (now - data.lastSeen < INACTIVITY_THRESHOLD)) {
+                    drivers.push(data);
+                }
+            });
+            // Retorna a lista real, mesmo que vazia.
+            callback(drivers);
+        },
+        (error) => {
+            console.error("Erro na subscrição de motoristas:", error);
+            // Fallback apenas em caso de erro crítico de conexão
+            callback(MOCK_DRIVERS_LIST);
+        }
+    );
 };
 
 export const updateDriverLocationInDB = async (driverId: string, lat: number, lng: number, address: string) => {
@@ -66,7 +72,8 @@ export const updateDriverLocationInDB = async (driverId: string, lat: number, ln
         await updateDoc(driverRef, {
             currentCoords: { lat, lng },
             currentAddress: address,
-            isMoving: true // Assume moving if updating via GPS
+            isMoving: true,
+            lastSeen: Date.now()
         });
     } catch (e) {
         console.error("Error updating location:", e);
@@ -76,9 +83,25 @@ export const updateDriverLocationInDB = async (driverId: string, lat: number, ln
 export const registerDriverInDB = async (driver: DriverState) => {
     if (!isConfigured) return;
     try {
-        await setDoc(doc(db, DRIVERS_COLLECTION, driver.id), driver, { merge: true });
+        const driverWithTimestamp = {
+            ...driver,
+            lastSeen: Date.now()
+        };
+        await setDoc(doc(db, DRIVERS_COLLECTION, driver.id), driverWithTimestamp, { merge: true });
     } catch (e) {
         console.error("Error registering driver:", e);
+    }
+};
+
+export const deleteDriverFromDB = async (driverId: string) => {
+    if (!isConfigured) return;
+    try {
+        const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
+        await deleteDoc(driverRef);
+        console.log(`Motorista ${driverId} removido com sucesso.`);
+    } catch (e) {
+        console.error("Error deleting driver:", e);
+        throw e;
     }
 };
 
@@ -86,7 +109,7 @@ export const updateDriverRouteInDB = async (driverId: string, route: DeliveryLoc
     if (!isConfigured) return;
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
-        await updateDoc(driverRef, { route });
+        await updateDoc(driverRef, { route, lastSeen: Date.now() });
     } catch (e) {
         console.error("Error updating route:", e);
     }
@@ -96,27 +119,24 @@ export const setDriverMovingStatus = async (driverId: string, isMoving: boolean)
     if (!isConfigured) return;
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
-        await updateDoc(driverRef, { isMoving });
+        await updateDoc(driverRef, { isMoving, lastSeen: Date.now() });
     } catch (e) {
         console.error("Error updating status:", e);
     }
 };
 
 // --- LOCATIONS ---
-
 export const subscribeToLocations = (callback: (locations: DeliveryLocation[]) => void) => {
     if (!isConfigured) {
         callback(LOCATIONS_DB);
         return () => {};
     }
-
     const q = query(collection(db, LOCATIONS_COLLECTION));
     return onSnapshot(q, (snapshot) => {
         const locations: DeliveryLocation[] = [];
         snapshot.forEach((doc) => {
             locations.push(doc.data() as DeliveryLocation);
         });
-        // Sort/Filter if needed, or just return all
         callback(locations.length > 0 ? locations : LOCATIONS_DB);
     });
 };

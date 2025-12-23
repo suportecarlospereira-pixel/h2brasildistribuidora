@@ -26,10 +26,11 @@ export interface DriverState {
   id: string;
   name: string;
   currentCoords: Coordinates;
-  currentAddress: string; // New: To show current street name
+  currentAddress: string;
   route: DeliveryLocation[];
   isMoving: boolean;
   speed: number;
+  lastSeen?: number; // Timestamp em milissegundos
 }
 
 export interface RouteHistory {
