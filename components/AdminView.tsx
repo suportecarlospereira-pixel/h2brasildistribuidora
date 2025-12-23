@@ -34,12 +34,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     };
 
     const handleDeleteDriver = async (id: string, name: string) => {
-        if (confirm(`Deseja realmente remover o motorista ${name}? Ele sumirá do mapa e do painel.`)) {
+        console.log("Admin: Evento de exclusão capturado para:", name);
+        if (window.confirm(`ATENÇÃO: Deseja remover permanentemente o motorista ${name}? Ele deixará de ser monitorado no mapa.`)) {
             try {
                 await deleteDriverFromDB(id);
-                alert(`${name} removido com sucesso.`);
+                console.log("Admin: Motorista excluído com sucesso.");
+                alert(`${name} foi removido.`);
             } catch (e) {
-                alert("Erro ao remover motorista. Tente novamente.");
+                console.error("Admin: Erro ao processar exclusão:", e);
+                alert("Erro ao remover motorista. Verifique sua conexão ou permissões.");
             }
         }
     };
@@ -142,14 +145,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                                 {driver.isMoving ? 'Em Rota' : 'Pausado'}
                                             </span>
                                             <button 
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleDeleteDriver(driver.id, driver.name);
-                                                }}
-                                                className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-100 rounded-lg transition-all md:opacity-0 md:group-hover:opacity-100 opacity-100"
+                                                onClick={() => handleDeleteDriver(driver.id, driver.name)}
+                                                className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all md:opacity-0 md:group-hover:opacity-100 opacity-100 active:scale-90"
                                                 title="Excluir motorista"
                                             >
-                                                <Trash2 className="w-4 h-4" />
+                                                <Trash2 className="w-5 h-5" />
                                             </button>
                                         </div>
                                     </div>

@@ -54,12 +54,12 @@ export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) =
                     drivers.push(data);
                 }
             });
-            // Retorna a lista real, mesmo que vazia.
+            console.log("Monitor H2: Recebida atualização de frotas.", drivers.length);
             callback(drivers);
         },
         (error) => {
-            console.error("Erro na subscrição de motoristas:", error);
-            // Fallback apenas em caso de erro crítico de conexão
+            console.error("Monitor H2: Erro crítico na subscrição (Verifique permissões do Firebase):", error);
+            // Fallback para mock apenas em caso de erro de conexão/permissão
             callback(MOCK_DRIVERS_LIST);
         }
     );
@@ -96,11 +96,12 @@ export const registerDriverInDB = async (driver: DriverState) => {
 export const deleteDriverFromDB = async (driverId: string) => {
     if (!isConfigured) return;
     try {
+        console.log(`Iniciando exclusão do motorista: ${driverId}`);
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
         await deleteDoc(driverRef);
-        console.log(`Motorista ${driverId} removido com sucesso.`);
+        console.log(`Motorista ${driverId} removido do Firestore com sucesso.`);
     } catch (e) {
-        console.error("Error deleting driver:", e);
+        console.error("Erro ao excluir motorista do Firestore:", e);
         throw e;
     }
 };
