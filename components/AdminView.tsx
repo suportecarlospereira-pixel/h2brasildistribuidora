@@ -34,15 +34,14 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     };
 
     const handleDeleteDriver = async (id: string, name: string) => {
-        console.log("Admin: Evento de exclusão capturado para:", name);
-        if (window.confirm(`ATENÇÃO: Deseja remover permanentemente o motorista ${name}? Ele deixará de ser monitorado no mapa.`)) {
+        console.log("Admin: Solicitando exclusão de:", name, id);
+        if (window.confirm(`Você deseja remover o motorista ${name} permanentemente?`)) {
             try {
                 await deleteDriverFromDB(id);
-                console.log("Admin: Motorista excluído com sucesso.");
-                alert(`${name} foi removido.`);
+                alert(`Motorista ${name} removido com sucesso.`);
             } catch (e) {
-                console.error("Admin: Erro ao processar exclusão:", e);
-                alert("Erro ao remover motorista. Verifique sua conexão ou permissões.");
+                console.error("Erro ao deletar motorista:", e);
+                alert("Não foi possível excluir. Verifique sua permissão.");
             }
         }
     };
@@ -145,9 +144,14 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                                 {driver.isMoving ? 'Em Rota' : 'Pausado'}
                                             </span>
                                             <button 
-                                                onClick={() => handleDeleteDriver(driver.id, driver.name)}
-                                                className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all md:opacity-0 md:group-hover:opacity-100 opacity-100 active:scale-90"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    handleDeleteDriver(driver.id, driver.name);
+                                                }}
+                                                className="relative z-50 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90"
                                                 title="Excluir motorista"
+                                                style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                             >
                                                 <Trash2 className="w-5 h-5" />
                                             </button>
