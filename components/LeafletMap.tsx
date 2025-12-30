@@ -1,19 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+// NOME DO ARQUIVO: components/LeafletMap.tsx
+import React, { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Coordinates, DeliveryLocation, DriverState, LocationType } from '../types';
-import { LocateFixed, Navigation as NavigationIcon, Compass } from 'lucide-react';
+import { DeliveryLocation, DriverState, LocationType } from '../types';
 import { ITAJAI_CENTER } from '../constants';
 
 const shadowUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
 
-// Custom icons
+// Ícones customizados
 const hqIcon = new L.Icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-black.png',
     shadowUrl, iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
 });
 
-// Numbered Marker Creator
 const createNumberedIcon = (number: number, isNext: boolean) => {
     const color = isNext ? '#10b981' : '#64748b';
     const size = isNext ? 'w-8 h-8' : 'w-6 h-6';
@@ -32,19 +31,19 @@ const createNumberedIcon = (number: number, isNext: boolean) => {
     });
 };
 
-const MapFixer: React.FC<{ trigger: any }> = ({ trigger }) => {
+// Componente para controlar o centro do mapa suavemente
+const MapController: React.FC<{ center: [number, number], zoom: number, driverId?: string }> = ({ center, zoom, driverId }) => {
     const map = useMap();
+    const lastDriverId = useRef<string | undefined>();
+
     useEffect(() => {
-        const resizeInterval = setInterval(() => map.invalidateSize(), 100);
-        const timeout = setTimeout(() => {
-            clearInterval(resizeInterval);
-            map.invalidateSize();
-        }, 1000);
-        return () => {
-            clearInterval(resizeInterval);
-            clearTimeout(timeout);
-        };
-    }, [map, trigger]);
+        // Só move o mapa se mudou o motorista selecionado ou se é a primeira carga
+        if (driverId !== lastDriverId.current) {
+            map.flyTo(center, zoom, { duration: 1.5 });
+            lastDriverId.current = driverId;
+        }
+    }, [center, zoom, map, driverId]);
+
     return null;
 };
 
@@ -79,10 +78,25 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
 
     const getDriverColor = (index: number) => ['#2563eb', '#f97316', '#16a34a', '#dc2626', '#9333ea', '#db2777'][index % 6];
     
+    // Invalidate size fix
+    const mapRef = useRef<L.Map>(null);
+    useEffect(() => {
+        if (mapRef.current) {
+            setTimeout(() => mapRef.current?.invalidateSize(), 400);
+        }
+    }, [isLayoutCompact]);
+
     return (
         <div className="w-full h-full relative overflow-hidden bg-slate-200">
-            <MapContainer center={centerPos} zoom={14} scrollWheelZoom={true} className="w-full h-full" zoomControl={false}>
-                <MapFixer trigger={isLayoutCompact} />
+            <MapContainer 
+                ref={mapRef}
+                center={ITAJAI_CENTER} 
+                zoom={13} 
+                className="w-full h-full" 
+                zoomControl={false}
+            >
+                <MapController center={centerPos} zoom={14} driverId={currentDriverId} />
+                
                 <TileLayer
                     attribution='&copy; OpenStreetMap'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -95,7 +109,7 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
                     </Marker>
                 ))}
 
-                {/* Drivers and their numbered routes */}
+                {/* Drivers */}
                 {drivers.map((driver, index) => {
                     const isSelected = driver.id === currentDriverId;
                     const color = getDriverColor(index);
@@ -106,7 +120,6 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
                                 <Popup><div className="font-bold">{driver.name}</div></Popup>
                             </Marker>
                             
-                            {/* Numbered Route Markers for Current Driver or all if admin */}
                             {driver.route.map((stop, stopIdx) => (
                                 <Marker 
                                     key={`${driver.id}-stop-${stop.id}`} 

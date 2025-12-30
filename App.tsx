@@ -18,7 +18,6 @@ import {
     getDriverById
 } from './services/dbService';
 
-// Lazy load view components
 const DriverView = lazy(() => import('./components/DriverView').then(m => ({ default: m.DriverView })));
 const AdminView = lazy(() => import('./components/AdminView').then(m => ({ default: m.AdminView })));
 
@@ -39,9 +38,12 @@ const LoadingFallback = () => (
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.LOGIN);
   
-  // Real-time Data
+  // Dados em Tempo Real
   const [drivers, setDrivers] = useState<DriverState[]>([]);
   const [locations, setLocations] = useState<DeliveryLocation[]>([]);
+  
+  // Refs para acesso dentro do GPS sem reiniciar o efeito
+  const driversRef = useRef<DriverState[]>([]); 
   
   const [currentUserDriverId, setCurrentUserDriverId] = useState<string>('');
   const [inputDriverName, setInputDriverName] = useState('');
@@ -54,9 +56,13 @@ const App: React.FC = () => {
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [isMobilePanelExpanded, setIsMobilePanelExpanded] = useState(false);
 
-  // Refs for GPS throttling
   const lastPositionRef = useRef<{lat: number; lng: number} | null>(null);
   const lastUpdateTimeRef = useRef<number>(0);
+
+  // Mantém o ref sincronizado com o state
+  useEffect(() => {
+      driversRef.current = drivers;
+  }, [drivers]);
 
   // --- INITIALIZATION ---
   useEffect(() => {
@@ -102,9 +108,7 @@ const App: React.FC = () => {
         alert("Por favor, digite seu nome para iniciar.");
         return;
     }
-    
     setIsLoginLoading(true);
-
     try {
         const newDriverId = `driver-${Date.now()}`;
         const newDriver: DriverState = {
@@ -116,12 +120,9 @@ const App: React.FC = () => {
             status: 'IDLE',
             speed: 0
         };
-
         await registerDriverInDB(newDriver);
-        
         localStorage.setItem(STORAGE_KEY_DRIVER, newDriverId);
         localStorage.setItem(STORAGE_KEY_VIEW, AppView.DRIVER);
-
         setCurrentUserDriverId(newDriverId);
         setCurrentView(AppView.DRIVER);
         requestLocation();
@@ -152,31 +153,42 @@ const App: React.FC = () => {
       setCurrentView(AppView.LOGIN);
   };
 
-  // --- GPS LOGIC ---
+  // --- OTIMIZAÇÃO DO GPS ---
   useEffect(() => {
     let watchId: number;
-    const currentDriver = drivers.find(d => d.id === currentUserDriverId);
 
-    // Só rastreia GPS se for motorista e NÃO estiver em intervalo
-    if (currentView === AppView.DRIVER && currentUserDriverId && currentDriver?.status !== 'BREAK') {
+    // Função interna para verificar status sem depender do state 'drivers'
+    const shouldTrack = () => {
+        if (currentView !== AppView.DRIVER || !currentUserDriverId) return false;
+        const driver = driversRef.current.find(d => d.id === currentUserDriverId);
+        // Se não achar o driver (recém logado) ou status não for BREAK, rastreia.
+        return !driver || driver.status !== 'BREAK';
+    };
+
+    if (shouldTrack()) {
       if ("geolocation" in navigator) {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
+            // Verificação dupla dentro do callback
+            if (!shouldTrack()) return;
+
             setGpsError(null);
             const { latitude, longitude, speed } = position.coords;
             const now = Date.now();
             const lastPos = lastPositionRef.current;
+            
+            // Filtro de distância (jitter filter)
             const dist = lastPos 
                 ? Math.sqrt(Math.pow(latitude - lastPos.lat, 2) + Math.pow(longitude - lastPos.lng, 2))
                 : 1;
 
+            // Envia se: (Não tem ultima posição) OU (Moveu > 3 metros E passou 1.5s) OU (Passou 10s parado)
             if (!lastPos || (dist > 0.00003 && now - lastUpdateTimeRef.current > 1500) || (now - lastUpdateTimeRef.current > 10000)) {
                 const currentSpeedKmH = speed ? speed * 3.6 : 0;
                 let addressStr = currentSpeedKmH > 1 
                     ? `Em movimento - ${currentSpeedKmH.toFixed(0)} km/h`
                     : `Parado em: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
                 
-                // Determina status baseado na velocidade
                 const status = currentSpeedKmH > 1 ? 'MOVING' : 'IDLE';
 
                 updateDriverLocationInDB(currentUserDriverId, latitude, longitude, addressStr, status);
@@ -193,8 +205,9 @@ const App: React.FC = () => {
         );
       }
     }
+    // Removemos 'drivers' das dependências para evitar reinicialização constante
     return () => { if (watchId) navigator.geolocation.clearWatch(watchId); };
-  }, [currentView, currentUserDriverId, drivers]);
+  }, [currentView, currentUserDriverId]); // Dependências limpas
 
   const updateSingleDriverRoute = async (driverId: string, newRoute: DeliveryLocation[]) => {
       await updateDriverRouteInDB(driverId, newRoute);
@@ -204,7 +217,14 @@ const App: React.FC = () => {
   const toggleDriverStatus = async (driverId: string) => {
       const driver = drivers.find(d => d.id === driverId);
       if (driver) {
+          // Lógica de alternância inteligente
           const newStatus = driver.status === 'BREAK' ? 'IDLE' : 'BREAK';
+          
+          // Se estiver saindo do intervalo, forçamos uma atualização de GPS imediata no DB
+          if (newStatus === 'IDLE') {
+             requestLocation(); 
+          }
+          
           await updateDriverStatusInDB(driverId, newStatus);
       }
   };
@@ -231,7 +251,16 @@ const App: React.FC = () => {
 
   const requestLocation = () => {
     if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(() => setGpsError(null), () => alert("Por favor, permita a localização para o monitoramento funcionar."));
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                setGpsError(null);
+                // Força atualização inicial ao logar/sair do intervalo
+                if(currentUserDriverId) {
+                    updateDriverLocationInDB(currentUserDriverId, pos.coords.latitude, pos.coords.longitude, "Localizado", 'IDLE');
+                }
+            }, 
+            () => alert("Por favor, permita a localização para o monitoramento funcionar.")
+        );
     }
   };
 
