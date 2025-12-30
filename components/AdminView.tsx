@@ -42,6 +42,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
             try {
                 await deleteDriverFromDB(id);
             } catch (e) {
+                console.error("Erro ao deletar:", e);
                 alert("Erro ao excluir. Verifique permissões.");
             } finally {
                 setDeletingId(null);
@@ -60,14 +61,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         return `${Math.floor(hours / 24)}d atrás`;
     };
 
+    // Função visual para mostrar status colorido
     const getStatusBadge = (status: string) => {
         switch (status) {
             case 'BREAK':
-                return <span className="text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter bg-amber-100 text-amber-800 flex items-center gap-1"><Coffee className="w-3 h-3"/> Almoço/Pausa</span>;
+                return <span className="text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter bg-amber-100 text-amber-800 flex items-center gap-1 border border-amber-200"><Coffee className="w-3 h-3"/> Almoço/Pausa</span>;
             case 'MOVING':
-                return <span className="text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter bg-emerald-100 text-emerald-800 flex items-center gap-1"><MapPin className="w-3 h-3"/> Em Rota</span>;
+                return <span className="text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter bg-emerald-100 text-emerald-800 flex items-center gap-1 border border-emerald-200"><MapPin className="w-3 h-3"/> Em Rota</span>;
             default:
-                return <span className="text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter bg-slate-100 text-slate-600">Parado</span>;
+                return <span className="text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter bg-slate-100 text-slate-600 border border-slate-200">Parado</span>;
         }
     };
 
@@ -97,6 +99,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
 
     return (
         <div className="flex flex-col h-full w-full bg-slate-50">
+            {/* Header Fixo */}
             <div className="flex-none p-5 bg-slate-900 text-white shadow-md z-10">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -123,7 +126,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                 </div>
             </div>
 
+            {/* Conteúdo com Scroll */}
             <div className="flex-1 overflow-y-auto pb-20 md:pb-4 no-scrollbar">
+                
+                {/* --- ABA 1: MONITOR (LIVE) --- */}
                 {activeTab === 'LIVE' && (
                     <div className="p-4 space-y-4">
                         <div className="flex items-center justify-between px-1">
@@ -233,8 +239,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                     </div>
                 )}
 
-                {/* (Mantive as tabs DISPATCH e HISTORY iguais para economizar espaço, elas continuam funcionando pois dependem das mesmas props) */}
-                {/* ... Restante do código das Tabs ... */}
+                {/* --- ABA 2: FROTAS (DISPATCH) --- */}
                 {activeTab === 'DISPATCH' && (
                      <div className="p-4 space-y-4">
                         <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl">
@@ -281,6 +286,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                      </div>
                 )}
 
+                {/* --- ABA 3: RELATÓRIOS (HISTORY) --- */}
                 {activeTab === 'HISTORY' && (
                     <div className="p-4 space-y-4">
                         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
