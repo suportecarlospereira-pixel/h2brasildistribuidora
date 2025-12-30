@@ -1,10 +1,9 @@
 // NOME DO ARQUIVO: components/AdminView.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { DriverState, DeliveryLocation, LocationType } from '../types';
-import { MOCK_HISTORY } from '../constants';
+import { DriverState, DeliveryLocation, LocationType, RouteHistory } from '../types';
 import { Users, Send, History, Calendar, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, Coffee, MapPin } from 'lucide-react';
 import { getSmartAssistantResponse } from '../services/geminiService';
-import { deleteDriverFromDB } from '../services/dbService';
+import { deleteDriverFromDB, subscribeToHistory } from '../services/dbService'; // Importação nova
 import { H2Logo } from './Logo';
 
 interface AdminViewProps {
@@ -21,10 +20,21 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     const [isLoading, setIsLoading] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+    
+    // Estado para o histórico REAL
+    const [historyData, setHistoryData] = useState<RouteHistory[]>([]);
+    
     const responseRef = useRef<HTMLDivElement>(null);
-
     const [selectedForDispatch, setSelectedForDispatch] = useState<Set<string>>(new Set());
     const [isDistributing, setIsDistributing] = useState(false);
+
+    // --- CARREGA HISTÓRICO REAL ---
+    useEffect(() => {
+        const unsubscribe = subscribeToHistory((data) => {
+            setHistoryData(data);
+        });
+        return () => unsubscribe();
+    }, []);
 
     const handleAskAssistant = async () => {
         if (!assistantQuery.trim()) return;
@@ -61,7 +71,6 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         return `${Math.floor(hours / 24)}d atrás`;
     };
 
-    // Função visual para mostrar status colorido
     const getStatusBadge = (status: string) => {
         switch (status) {
             case 'BREAK':
@@ -94,7 +103,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         }
     }, [assistantResponse]);
 
-    const filteredHistory = MOCK_HISTORY.filter(h => h.date === selectedDate);
+    // Filtra o histórico real pela data selecionada
+    const filteredHistory = historyData.filter(h => h.date === selectedDate);
     const pendingLocations = allLocations.filter(l => l.type !== LocationType.HEADQUARTERS);
 
     return (
@@ -286,7 +296,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                      </div>
                 )}
 
-                {/* --- ABA 3: RELATÓRIOS (HISTORY) --- */}
+                {/* --- ABA 3: RELATÓRIOS (HISTORY REAL) --- */}
                 {activeTab === 'HISTORY' && (
                     <div className="p-4 space-y-4">
                         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
@@ -313,7 +323,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                                 </div>
                                                 <div>
                                                     <h4 className="font-black text-slate-900 text-sm leading-tight">{record.driverName}</h4>
-                                                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">REF: {record.id}</p>
+                                                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">REF: {record.id.slice(0,8)}</p>
                                                 </div>
                                             </div>
                                             <span className={`text-[9px] px-2.5 py-1 rounded-full font-black uppercase tracking-tighter ${record.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
@@ -322,7 +332,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                         </div>
                                         
                                         <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                                            <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mb-3">Roteiro Efetuado ({record.totalDeliveries})</p>
+                                            <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mb-3">Roteiro Efetuado ({record.totalDeliveries} entregas)</p>
                                             <div className="flex flex-wrap gap-1.5">
                                                 {record.locations.map((loc, idx) => (
                                                     <span key={idx} className="text-[10px] bg-white text-slate-700 px-3 py-1.5 rounded-xl border border-slate-100 font-bold shadow-sm">
