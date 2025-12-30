@@ -2,19 +2,19 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { DeliveryLocation, DriverState } from '../types';
 
-// --- SEGURANÇA ---
-// Função auxiliar para pegar o cliente apenas quando necessário
+// --- SEGURANÇA E CONFIGURAÇÃO ---
 const getAIClient = () => {
-  // Tenta pegar a chave injetada pelo Vite
   const apiKey = process.env.API_KEY; 
-  
-  // Se a chave não existir ou for o placeholder, retorna nulo e não trava o app
   if (!apiKey || apiKey.includes("PLACEHOLDER") || apiKey === "undefined") {
     console.warn("IA Offline: Chave de API inválida ou não configurada.");
     return null;
   }
-  
   return new GoogleGenAI({ apiKey });
+};
+
+// HELPER: Limpa formatações Markdown (```json) que a IA envia frequentemente
+const cleanGeminiJSON = (text: string): string => {
+    return text.replace(/```json/g, '').replace(/```/g, '').trim();
 };
 
 // --- FUNÇÕES ---
@@ -24,17 +24,22 @@ export const optimizeRouteOrder = async (
   destinations: DeliveryLocation[]
 ): Promise<string[]> => {
   const ai = getAIClient();
-  // Se a IA não estiver disponível, retorna a rota original sem travar
-  if (!ai || destinations.length === 0) return destinations.map(d => d.id);
+  // Se a IA não estiver disponível ou só tiver 1 destino, não precisa otimizar
+  if (!ai || destinations.length <= 1) return destinations.map(d => d.id);
   
-  const destList = destinations.map(d => `- ID: ${d.id}, Nome: ${d.name}, Endereço: ${d.address}, Lat: ${d.coords.lat}, Lng: ${d.coords.lng}`).join('\n');
+  const destList = destinations.map(d => `- ID: ${d.id}, Endereço: ${d.address}, Coords: ${d.coords.lat},${d.coords.lng}`).join('\n');
 
   const prompt = `
     Atue como especialista logístico em Itajaí, SC.
-    Origem: Lat: ${startPoint.lat}, Lng: ${startPoint.lng}.
+    Origem GPS: ${startPoint.lat}, ${startPoint.lng}.
     Destinos:
     ${destList}
-    Ordene os IDs para otimizar tempo. Retorne APENAS array JSON de strings.
+    
+    TAREFA: Ordene os IDs para a rota mais rápida considerando o trânsito urbano.
+    REGRAS:
+    1. Otimize para evitar retorno em avenidas principais.
+    2. Retorne APENAS um Array JSON puro com os IDs na ordem (ex: ["id1", "id2"]).
+    3. NÃO escreva explicações, apenas o JSON.
   `;
 
   try {
@@ -50,11 +55,13 @@ export const optimizeRouteOrder = async (
       }
     });
 
-    const jsonStr = response.text?.trim();
-    if (jsonStr) return JSON.parse(jsonStr) as string[];
-    return destinations.map(d => d.id);
+    const rawText = response.text || "[]";
+    const cleanedJson = cleanGeminiJSON(rawText);
+    
+    return JSON.parse(cleanedJson) as string[];
   } catch (error) {
-    console.error("Erro IA:", error);
+    console.error("Erro IA Otimização:", error);
+    // Fallback: Retorna a ordem original se a IA falhar
     return destinations.map(d => d.id);
   }
 };
@@ -63,8 +70,14 @@ export const getRouteBriefingAudio = async (driverName: string, route: DeliveryL
   const ai = getAIClient();
   if (!ai || route.length === 0) return null;
 
-  const stops = route.map((l, i) => `${i + 1}ª: ${l.name}`).join('. ');
-  const prompt = `Fale curto e motivador: Olá ${driverName}. Rota pronta com ${route.length} paradas: ${stops}. Bom trabalho!`;
+  // Simplifica o texto para o áudio ficar natural
+  const stops = route.slice(0, 5).map((l, i) => `${i + 1}: ${l.name.split('-')[0]}`).join('. ');
+  const more = route.length > 5 ? `e mais ${route.length - 5} locais.` : '';
+  
+  const prompt = `
+    Fale como um operador de rádio amigável e profissional.
+    Texto: "Olá ${driverName}. Rota carregada com ${route.length} entregas. Sequência inicial: ${stops} ${more}. Bom trabalho e atenção no trânsito."
+  `;
 
   try {
     const response = await ai.models.generateContent({
@@ -79,6 +92,7 @@ export const getRouteBriefingAudio = async (driverName: string, route: DeliveryL
     });
     return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
   } catch (e) {
+    console.error("Erro IA Audio:", e);
     return null;
   }
 };
@@ -90,11 +104,11 @@ export const getSmartAssistantResponse = async (query: string): Promise<string> 
   try {
      const response = await ai.models.generateContent({
       model: 'gemini-2.0-flash',
-      contents: `Você é a IA da H2 Brasil. Responda: ${query}`,
+      contents: `Você é o assistente da Logística H2 Brasil. Responda de forma curta e executiva (max 2 frases): ${query}`,
     });
     return response.text || "Sem resposta.";
   } catch (e) {
-    return "Erro ao contatar IA.";
+    return "Erro de conexão com a IA.";
   }
 }
 
@@ -105,6 +119,7 @@ export const distributeAndOptimizeRoutes = async (
     const ai = getAIClient();
     if (!ai) return {};
 
-    // Lógica simplificada para evitar erro de tipo se IA falhar
+    // Lógica simplificada de fallback (se a IA não carregar, não distribui nada para evitar erros)
+    // Em produção real, você usaria o mesmo padrão do optimizeRouteOrder
     return {}; 
 };
