@@ -17,7 +17,10 @@ import { LOCATIONS_DB, MOCK_DRIVERS_LIST } from '../constants';
 
 const DRIVERS_COLLECTION = 'drivers';
 const LOCATIONS_COLLECTION = 'locations';
-const INACTIVITY_THRESHOLD = 4 * 24 * 60 * 60 * 1000; // 4 Dias em ms
+
+// --- CONFIGURAÇÃO DE FILTRO ---
+// Alterado para 5 dias conforme solicitado (5 * 24h * 60m * 60s * 1000ms)
+const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; 
 
 // --- INITIALIZATION ---
 export const seedDatabaseIfEmpty = async () => {
@@ -67,6 +70,9 @@ export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) =
                 const drivers: DriverState[] = [];
                 snapshot.forEach((doc) => {
                     const data = doc.data() as DriverState;
+                    // LÓGICA DE FILTRO AUTOMÁTICO:
+                    // Se o motorista não atualiza há mais de 5 dias, ele não entra na lista.
+                    // Isso remove ele do mapa automaticamente.
                     if (!data.lastSeen || (now - data.lastSeen < INACTIVITY_THRESHOLD)) {
                         drivers.push(data);
                     }
@@ -96,7 +102,7 @@ export const updateDriverLocationInDB = async (driverId: string, lat: number, ln
             lastSeen: Date.now()
         });
     } catch (e) {
-        // Silently fail in production allows smooth UI
+        // Falha silenciosa em produção para manter a UI fluida
     }
 };
 
@@ -110,10 +116,10 @@ export const registerDriverInDB = async (driver: DriverState) => {
         await setDoc(doc(db, DRIVERS_COLLECTION, driver.id), driverWithTimestamp, { merge: true });
     } catch (e) {
         console.error("Erro ao registrar motorista (continuando localmente):", e);
-        // Não lançamos o erro novamente para permitir que o app funcione offline
     }
 };
 
+// FUNÇÃO DE EXCLUSÃO
 export const deleteDriverFromDB = async (driverId: string) => {
     if (!isConfigured) return;
     try {

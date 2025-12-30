@@ -1,7 +1,8 @@
+// NOME DO ARQUIVO: components/AdminView.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { DriverState, DeliveryLocation, LocationType } from '../types';
 import { MOCK_HISTORY } from '../constants';
-import { LayoutDashboard, Users, Map as MapIcon, Mic, Send, History, Calendar, Navigation, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2 } from 'lucide-react';
+import { LayoutDashboard, Users, Map as MapIcon, Mic, Send, History, Calendar, Navigation, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, AlertTriangle } from 'lucide-react';
 import { getSmartAssistantResponse } from '../services/geminiService';
 import { deleteDriverFromDB } from '../services/dbService';
 import { H2Logo } from './Logo';
@@ -18,6 +19,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     const [assistantQuery, setAssistantQuery] = useState('');
     const [assistantResponse, setAssistantResponse] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [deletingId, setDeletingId] = useState<string | null>(null); // Novo estado para controle de exclusão
     const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const responseRef = useRef<HTMLDivElement>(null);
 
@@ -34,14 +36,18 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     };
 
     const handleDeleteDriver = async (id: string, name: string) => {
-        console.log("Admin: Solicitando exclusão de:", name, id);
-        if (window.confirm(`Você deseja remover o motorista ${name} permanentemente?`)) {
+        if (deletingId) return; // Evita clique duplo
+        
+        if (window.confirm(`ATENÇÃO: Deseja remover o motorista "${name}" do sistema?`)) {
+            setDeletingId(id);
             try {
                 await deleteDriverFromDB(id);
-                alert(`Motorista ${name} removido com sucesso.`);
+                // O subscribeToDrivers vai atualizar a lista automaticamente
             } catch (e) {
                 console.error("Erro ao deletar motorista:", e);
-                alert("Não foi possível excluir. Verifique sua permissão.");
+                alert("Erro ao excluir. Verifique se você tem permissão de Admin.");
+            } finally {
+                setDeletingId(null);
             }
         }
     };
@@ -114,7 +120,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                 {activeTab === 'LIVE' && (
                     <div className="p-4 space-y-4">
                         <div className="flex items-center justify-between px-1">
-                            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Motoristas Ativos</h3>
+                            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Motoristas Ativos (últimos 5 dias)</h3>
                             <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-[10px] font-black">{allDrivers.length} ONLINE</span>
                         </div>
 
@@ -143,17 +149,24 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                             <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter ${driver.isMoving ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
                                                 {driver.isMoving ? 'Em Rota' : 'Pausado'}
                                             </span>
+                                            
+                                            {/* BOTÃO DE EXCLUIR MELHORADO */}
                                             <button 
                                                 onClick={(e) => {
                                                     e.preventDefault();
                                                     e.stopPropagation();
                                                     handleDeleteDriver(driver.id, driver.name);
                                                 }}
+                                                disabled={deletingId === driver.id}
                                                 className="relative z-50 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90"
-                                                title="Excluir motorista"
+                                                title="Excluir motorista permanentemente"
                                                 style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                             >
-                                                <Trash2 className="w-5 h-5" />
+                                                {deletingId === driver.id ? (
+                                                    <Loader2 className="w-5 h-5 animate-spin text-red-500" />
+                                                ) : (
+                                                    <Trash2 className="w-5 h-5" />
+                                                )}
                                             </button>
                                         </div>
                                     </div>
