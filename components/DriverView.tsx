@@ -8,7 +8,7 @@ import { H2Logo } from './Logo';
 
 interface DriverViewProps {
     driverState: DriverState;
-    updateRoute: (newRoute: DeliveryLocation[]) => Promise<void>; // Retorna Promise
+    updateRoute: (newRoute: DeliveryLocation[]) => Promise<void>;
     toggleStatus: () => void;
     completeDelivery: () => void;
 }
@@ -38,36 +38,27 @@ export const DriverView: React.FC<DriverViewProps> = ({
         
         try {
             const selectedLocations = LOCATIONS_DB.filter(l => selectedIds.has(l.id));
-            
-            // 1. Tenta Otimizar com IA
-            let orderedRoute: DeliveryLocation[] = [];
+            let orderedRoute = selectedLocations;
+
+            // Tentativa de Otimização com IA (Falha graciosamente se der erro)
             try {
                 const optimizedIds = await optimizeRouteOrder(driverState.currentCoords, selectedLocations);
-                orderedRoute = optimizedIds
-                    .map(id => selectedLocations.find(l => l.id === id))
-                    .filter((l): l is DeliveryLocation => !!l);
+                if (optimizedIds && optimizedIds.length > 0) {
+                     orderedRoute = optimizedIds
+                        .map(id => selectedLocations.find(l => l.id === id))
+                        .filter((l): l is DeliveryLocation => !!l);
+                }
             } catch (aiError) {
-                console.warn("IA falhou, usando ordem padrão:", aiError);
-                orderedRoute = selectedLocations;
+                console.warn("IA indisponível, seguindo ordem manual.");
             }
 
-            // Fallback se a lista vier vazia
-            if (orderedRoute.length === 0) {
-                orderedRoute = selectedLocations;
-            }
-
-            // 2. Limpeza de Dados (Sanitização)
-            // Remove 'undefined' que causa erro no Firebase
-            const cleanRoute = JSON.parse(JSON.stringify(orderedRoute));
-
-            // 3. Atualiza o Banco de Dados
-            await updateRoute(cleanRoute);
+            // O dbService agora possui sanitização interna, podemos enviar direto
+            await updateRoute(orderedRoute);
 
         } catch (e: any) {
-            console.error("Erro no fluxo de rota:", e);
-            let msg = "Erro ao iniciar rota. Tente novamente.";
-            if (e.code === 'permission-denied') msg = "Erro de Permissão: Regras do Firebase bloqueando.";
-            if (e.message) msg = `Erro: ${e.message}`;
+            console.error("Falha ao salvar rota:", e);
+            let msg = "Não foi possível iniciar a rota. Verifique sua conexão.";
+            if (e.code === 'permission-denied') msg = "Acesso negado ao banco de dados.";
             setErrorMsg(msg);
         } finally {
             setIsOptimizing(false);
@@ -85,7 +76,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const currentTarget = driverState.route[0];
     const isBreak = driverState.status === 'BREAK';
 
-    // RENDERIZAÇÃO: ROTA ATIVA
+    // ROTA ATIVA
     if (driverState.route.length > 0) {
         return (
             <div className="flex flex-col h-full w-full bg-white">
@@ -97,13 +88,13 @@ export const DriverView: React.FC<DriverViewProps> = ({
                             <p className="text-slate-400 text-[10px] font-medium uppercase">{driverState.name}</p>
                         </div>
                     </div>
-                    <button onClick={playBriefing} className="bg-emerald-600 p-2 rounded-full hover:bg-emerald-500 transition-colors shadow-lg">
+                    <button onClick={playBriefing} className="bg-emerald-600 p-2 rounded-full hover:bg-emerald-500 transition-colors shadow-lg active:scale-95">
                         <Volume2 className="w-4 h-4 text-white" />
                     </button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20 md:pb-4">
-                    <div className={`rounded-2xl p-5 shadow-xl relative overflow-hidden transition-colors duration-500 ${isBreak ? 'bg-amber-500 text-white' : 'bg-slate-900 text-white'}`}>
+                    <div className={`rounded-2xl p-5 shadow-xl relative overflow-hidden transition-all duration-500 ${isBreak ? 'bg-amber-500 text-white' : 'bg-slate-900 text-white'}`}>
                         <div className="absolute top-0 right-0 p-4 opacity-10">
                             {isBreak ? <Coffee className="w-20 h-20" /> : <Truck className="w-20 h-20" />}
                         </div>
@@ -111,7 +102,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                         {isBreak ? (
                             <div className="text-center py-4">
                                 <h3 className="text-2xl font-black uppercase tracking-widest mb-1">EM INTERVALO</h3>
-                                <p className="text-white/80 text-sm mb-4">Sua localização está pausada.</p>
+                                <p className="text-white/80 text-sm mb-4">Monitoramento pausado.</p>
                             </div>
                         ) : (
                             <>
@@ -124,7 +115,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                         <div className="grid grid-cols-2 gap-3 relative z-10">
                             <button 
                                 onClick={toggleStatus} 
-                                className={`py-4 rounded-xl font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2 ${
+                                className={`py-4 rounded-xl font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95 ${
                                     isBreak 
                                     ? 'bg-white text-amber-600 hover:bg-amber-50' 
                                     : 'bg-amber-500 text-white hover:bg-amber-400'
@@ -146,8 +137,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     {!isBreak && (
                         <div className="space-y-2">
                             <div className="flex items-center justify-between mb-2">
-                                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cronograma de Entrega</h4>
-                                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-bold">{driverState.route.length} restantes</span>
+                                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cronograma</h4>
+                                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-bold">{driverState.route.length} pendentes</span>
                             </div>
                             {driverState.route.map((loc, idx) => (
                                 <div key={loc.id} className="flex items-center gap-4 bg-white border border-slate-100 p-3 rounded-xl hover:shadow-md transition-all">
@@ -168,7 +159,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         );
     }
 
-    // RENDERIZAÇÃO: SELEÇÃO DE ROTA (INICIAL)
+    // TELA INICIAL (MONTAGEM DE ROTA)
     return (
         <div className="flex flex-col h-full w-full bg-white">
             <div className="flex-none p-5 bg-slate-900 text-white shadow-md flex justify-between items-center">
@@ -191,14 +182,14 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
                 <div className="bg-slate-50 p-6 rounded-3xl border border-dashed border-slate-300">
                     <h3 className="font-bold text-slate-800 mb-1">Montar Rota do Dia</h3>
-                    <p className="text-xs text-slate-500 mb-6">Selecione os destinos e a IA fará o resto.</p>
+                    <p className="text-xs text-slate-500 mb-6">Selecione os destinos. A IA otimizará a sequência.</p>
                     
                     <div className="grid grid-cols-1 gap-2">
                         {LOCATIONS_DB.filter(l => l.type !== LocationType.HEADQUARTERS).map(loc => (
                             <div 
                                 key={loc.id}
                                 onClick={() => toggleSelection(loc.id)}
-                                className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center justify-between transition-all ${selectedIds.has(loc.id) ? 'bg-emerald-50 border-emerald-500 scale-[1.02]' : 'bg-white border-slate-100'}`}
+                                className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center justify-between transition-all active:scale-[0.98] ${selectedIds.has(loc.id) ? 'bg-emerald-50 border-emerald-500' : 'bg-white border-slate-100 hover:border-slate-300'}`}
                             >
                                 <div className="overflow-hidden pr-4">
                                     <p className="font-bold text-sm text-slate-800 truncate">{loc.name}</p>
