@@ -5,14 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build", 
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@google/genai": "latest",
     "firebase": "^10.8.0",
     "leaflet": "^1.9.4",
-    "lucide-react": "^0.450.0",
+    "lucide-react": "latest",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-leaflet": "^4.2.1"
