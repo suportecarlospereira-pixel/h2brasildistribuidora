@@ -13,7 +13,7 @@ import {
     getDoc,
     limit,
     where,
-    orderBy // Importante para garantir a ordem cronológica
+    orderBy
 } from 'firebase/firestore';
 import { DeliveryLocation, DriverState, DriverStatus, RouteHistory } from '../types';
 import { LOCATIONS_DB, MOCK_DRIVERS_LIST } from '../constants';
@@ -22,9 +22,10 @@ const DRIVERS_COLLECTION = 'drivers';
 const LOCATIONS_COLLECTION = 'locations';
 const HISTORY_COLLECTION = 'history';
 
-const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; // 5 Dias
+// Configuração: Motoristas inativos há mais de 5 dias somem do mapa
+const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; 
 
-// HELPER: Sanitização para evitar erros no Firebase
+// HELPER: Sanitização profunda para evitar erros no Firebase (remove undefined)
 const sanitizeForFirestore = (obj: any): any => {
     return JSON.parse(JSON.stringify(obj, (key, value) => {
         return value === undefined ? null : value;
@@ -40,12 +41,13 @@ export const seedDatabaseIfEmpty = async () => {
             const batch = writeBatch(db);
             LOCATIONS_DB.forEach(loc => {
                 const docRef = doc(db, LOCATIONS_COLLECTION, loc.id);
+                // Sanitiza antes de salvar para garantir compatibilidade
                 batch.set(docRef, sanitizeForFirestore(loc));
             });
             await batch.commit();
         }
     } catch (e) {
-        console.warn("Offline: Banco de dados não semeado.");
+        console.warn("Modo Offline: Não foi possível semear o DB.");
     }
 };
 
@@ -117,7 +119,9 @@ export const updateDriverLocationInDB = async (driverId: string, lat: number, ln
             status: status,
             lastSeen: Date.now()
         });
-    } catch (e) { }
+    } catch (e) { 
+        // Fail silently em updates de GPS para não travar a UI
+    }
 };
 
 export const updateDriverStatusInDB = async (driverId: string, status: DriverStatus) => {
@@ -125,7 +129,7 @@ export const updateDriverStatusInDB = async (driverId: string, status: DriverSta
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
         await updateDoc(driverRef, { status, lastSeen: Date.now() });
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Erro status:", e); }
 };
 
 export const registerDriverInDB = async (driver: DriverState) => {
@@ -149,7 +153,10 @@ export const updateDriverRouteInDB = async (driverId: string, route: DeliveryLoc
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
         const cleanRoute = sanitizeForFirestore(route);
         await updateDoc(driverRef, { route: cleanRoute, lastSeen: Date.now() });
-    } catch (e) { throw e; }
+    } catch (e) { 
+        console.error("Erro salvar rota:", e);
+        throw e;
+    }
 };
 
 // --- HISTÓRICO ---
@@ -159,7 +166,7 @@ export const saveRouteToHistoryDB = async (historyItem: RouteHistory) => {
     try {
         const docId = `history-${historyItem.driverName}-${Date.now()}`;
         const docRef = doc(db, HISTORY_COLLECTION, docId);
-        await setDoc(docRef, sanitizeForFirestore(historyItem));
+        await setDoc(docRef, sanitizeForFirestore({ ...historyItem, id: docId }));
     } catch (e) { console.error("Erro ao salvar histórico:", e); }
 };
 
@@ -176,12 +183,9 @@ export const deleteRouteHistoryFromDB = async (historyId: string) => {
 export const subscribeToHistory = (callback: (history: RouteHistory[]) => void) => {
     if (!isConfigured) return () => {};
     try {
-        // MELHORIA: Ordena por data decrescente e aumenta limite para permitir relatórios longos
-        const q = query(
-            collection(db, HISTORY_COLLECTION), 
-            orderBy('date', 'desc'), 
-            limit(300)
-        ); 
+        // Tenta ordenar pelo banco (Requer índice composto no Firebase Console se falhar)
+        // Se falhar, o catch pega e fazemos sort no cliente
+        const q = query(collection(db, HISTORY_COLLECTION), orderBy('date', 'desc'), limit(300)); 
         
         return onSnapshot(q, (snapshot) => {
             const history: RouteHistory[] = [];
@@ -191,8 +195,8 @@ export const subscribeToHistory = (callback: (history: RouteHistory[]) => void) 
             });
             callback(history);
         }, (error) => {
-            // Fallback se faltar índice composto no Firebase (raro para queries simples)
-            console.warn("Fallback de ordenação:", error);
+            // Fallback: Se der erro de índice, busca simples e ordena no Javascript
+            console.warn("Fallback de ordenação ativado (crie índice no Firebase se possível).");
             const qSimple = query(collection(db, HISTORY_COLLECTION), limit(100));
             onSnapshot(qSimple, (snap) => {
                 const h: RouteHistory[] = [];
