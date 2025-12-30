@@ -25,7 +25,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     
     // --- ESTADOS DE ENTREGA ---
-    // Acumula o histórico localmente enquanto o motorista faz a rota
     const [completedRecords, setCompletedRecords] = useState<DeliveryRecord[]>([]);
     
     // Estados do Modal de Finalização
@@ -54,7 +53,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         if (selectedIds.size === 0) return;
         setIsOptimizing(true);
         setErrorMsg(null);
-        setCompletedRecords([]); // Limpa histórico anterior
+        setCompletedRecords([]); 
         
         try {
             const selectedLocations = LOCATIONS_DB.filter(l => selectedIds.has(l.id));
@@ -268,6 +267,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
     }
 
     // TELA DE SELEÇÃO (INÍCIO)
+    // Correção do ERRO AQUI: Removemos "LocationType.HEADQUARTERS" e usamos string direta
     return (
         <div className="flex flex-col h-full w-full bg-white">
             <div className="flex-none p-5 bg-slate-900 text-white shadow-md flex justify-between items-center">
@@ -293,7 +293,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     <p className="text-xs text-slate-500 mb-6">Selecione os destinos. A IA otimizará a sequência.</p>
                     
                     <div className="grid grid-cols-1 gap-2">
-                        {LOCATIONS_DB.filter(l => l.type !== LocationType.HEADQUARTERS).map(loc => (
+                        {/* AQUI ESTAVA O ERRO: Substituído LocationType.HEADQUARTERS por string 'HEADQUARTERS' */}
+                        {LOCATIONS_DB.filter(l => l.type !== 'HEADQUARTERS').map(loc => (
                             <div 
                                 key={loc.id}
                                 onClick={() => toggleSelection(loc.id)}
