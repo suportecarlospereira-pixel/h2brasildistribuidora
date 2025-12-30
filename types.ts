@@ -1,3 +1,4 @@
+// NOME DO ARQUIVO: types.ts
 export enum LocationType {
   UBS = 'UBS',
   CRAS = 'CRAS',
@@ -6,6 +7,9 @@ export enum LocationType {
   DRIVER = 'DRIVER',
   OTHER = 'OTHER'
 }
+
+// Novo sistema de status para maior controle
+export type DriverStatus = 'IDLE' | 'MOVING' | 'BREAK';
 
 export interface Coordinates {
   lat: number;
@@ -28,17 +32,17 @@ export interface DriverState {
   currentCoords: Coordinates;
   currentAddress: string;
   route: DeliveryLocation[];
-  isMoving: boolean;
+  status: DriverStatus; // Substitui isMoving por algo mais robusto
   speed: number;
   lastSeen?: number; // Timestamp em milissegundos
 }
 
 export interface RouteHistory {
   id: string;
-  date: string; // ISO Date YYYY-MM-DD
+  date: string;
   driverName: string;
   totalDeliveries: number;
-  locations: string[]; // List of names delivered
+  locations: string[];
   status: 'COMPLETED' | 'PARTIAL';
 }
 

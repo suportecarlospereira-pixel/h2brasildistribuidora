@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { DriverState, DeliveryLocation, LocationType } from '../types';
 import { MOCK_HISTORY } from '../constants';
-import { LayoutDashboard, Users, Map as MapIcon, Mic, Send, History, Calendar, Navigation, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, AlertTriangle } from 'lucide-react';
+import { Users, Send, History, Calendar, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, Coffee, MapPin } from 'lucide-react';
 import { getSmartAssistantResponse } from '../services/geminiService';
 import { deleteDriverFromDB } from '../services/dbService';
 import { H2Logo } from './Logo';
@@ -19,7 +19,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     const [assistantQuery, setAssistantQuery] = useState('');
     const [assistantResponse, setAssistantResponse] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [deletingId, setDeletingId] = useState<string | null>(null); // Novo estado para controle de exclusão
+    const [deletingId, setDeletingId] = useState<string | null>(null);
     const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const responseRef = useRef<HTMLDivElement>(null);
 
@@ -36,16 +36,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     };
 
     const handleDeleteDriver = async (id: string, name: string) => {
-        if (deletingId) return; // Evita clique duplo
-        
+        if (deletingId) return;
         if (window.confirm(`ATENÇÃO: Deseja remover o motorista "${name}" do sistema?`)) {
             setDeletingId(id);
             try {
                 await deleteDriverFromDB(id);
-                // O subscribeToDrivers vai atualizar a lista automaticamente
             } catch (e) {
-                console.error("Erro ao deletar motorista:", e);
-                alert("Erro ao excluir. Verifique se você tem permissão de Admin.");
+                alert("Erro ao excluir. Verifique permissões.");
             } finally {
                 setDeletingId(null);
             }
@@ -61,6 +58,17 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         const hours = Math.floor(mins / 60);
         if (hours < 24) return `${hours}h atrás`;
         return `${Math.floor(hours / 24)}d atrás`;
+    };
+
+    const getStatusBadge = (status: string) => {
+        switch (status) {
+            case 'BREAK':
+                return <span className="text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter bg-amber-100 text-amber-800 flex items-center gap-1"><Coffee className="w-3 h-3"/> Almoço/Pausa</span>;
+            case 'MOVING':
+                return <span className="text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter bg-emerald-100 text-emerald-800 flex items-center gap-1"><MapPin className="w-3 h-3"/> Em Rota</span>;
+            default:
+                return <span className="text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter bg-slate-100 text-slate-600">Parado</span>;
+        }
     };
 
     const toggleDispatchSelection = (id: string) => {
@@ -89,7 +97,6 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
 
     return (
         <div className="flex flex-col h-full w-full bg-slate-50">
-            {/* Header */}
             <div className="flex-none p-5 bg-slate-900 text-white shadow-md z-10">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -146,11 +153,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <span className={`text-[9px] px-2 py-1 rounded-full font-black uppercase tracking-tighter ${driver.isMoving ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
-                                                {driver.isMoving ? 'Em Rota' : 'Pausado'}
-                                            </span>
+                                            {getStatusBadge(driver.status)}
                                             
-                                            {/* BOTÃO DE EXCLUIR MELHORADO */}
                                             <button 
                                                 onClick={(e) => {
                                                     e.preventDefault();
@@ -160,7 +164,6 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                                 disabled={deletingId === driver.id}
                                                 className="relative z-50 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90"
                                                 title="Excluir motorista permanentemente"
-                                                style={{ minWidth: '44px', minHeight: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                             >
                                                 {deletingId === driver.id ? (
                                                     <Loader2 className="w-5 h-5 animate-spin text-red-500" />
@@ -194,7 +197,6 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                             ))
                         )}
 
-                        {/* AI Assistant */}
                         <div className="bg-emerald-900 rounded-3xl p-5 text-white shadow-xl shadow-emerald-900/20 relative overflow-hidden">
                             <div className="absolute -right-4 -top-4 opacity-10">
                                 <BrainCircuit className="w-32 h-32" />
@@ -231,6 +233,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                     </div>
                 )}
 
+                {/* (Mantive as tabs DISPATCH e HISTORY iguais para economizar espaço, elas continuam funcionando pois dependem das mesmas props) */}
+                {/* ... Restante do código das Tabs ... */}
                 {activeTab === 'DISPATCH' && (
                      <div className="p-4 space-y-4">
                         <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl">

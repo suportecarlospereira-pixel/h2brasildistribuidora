@@ -12,7 +12,7 @@ import {
     updateDriverLocationInDB, 
     registerDriverInDB, 
     updateDriverRouteInDB, 
-    setDriverMovingStatus,
+    updateDriverStatusInDB,
     seedDatabaseIfEmpty,
     updateLocationStatusInDB,
     getDriverById
@@ -45,9 +45,8 @@ const App: React.FC = () => {
   
   const [currentUserDriverId, setCurrentUserDriverId] = useState<string>('');
   const [inputDriverName, setInputDriverName] = useState('');
-  const [isLoginLoading, setIsLoginLoading] = useState(false); // Novo estado de loading
+  const [isLoginLoading, setIsLoginLoading] = useState(false);
   
-  // Admin Login State
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [adminError, setAdminError] = useState('');
@@ -63,20 +62,17 @@ const App: React.FC = () => {
   useEffect(() => {
     seedDatabaseIfEmpty();
 
-    // Tentar restaurar sessão anterior
     const restoreSession = async () => {
         const savedDriverId = localStorage.getItem(STORAGE_KEY_DRIVER);
         const savedView = localStorage.getItem(STORAGE_KEY_VIEW);
 
         if (savedDriverId && savedView === AppView.DRIVER) {
             setIsLoginLoading(true);
-            // Tenta verificar se o motorista ainda existe no DB, senão cria mock local
             const existingDriver = await getDriverById(savedDriverId);
             if (existingDriver) {
                 setCurrentUserDriverId(savedDriverId);
                 setCurrentView(AppView.DRIVER);
             } else {
-                // Sessão inválida ou expirada
                 localStorage.removeItem(STORAGE_KEY_DRIVER);
                 localStorage.removeItem(STORAGE_KEY_VIEW);
             }
@@ -107,7 +103,7 @@ const App: React.FC = () => {
         return;
     }
     
-    setIsLoginLoading(true); // Ativa spinner
+    setIsLoginLoading(true);
 
     try {
         const newDriverId = `driver-${Date.now()}`;
@@ -117,14 +113,12 @@ const App: React.FC = () => {
             currentCoords: LOCATIONS_DB[0].coords,
             currentAddress: 'Iniciando turno...',
             route: [],
-            isMoving: false,
-            speed: 0.0005
+            status: 'IDLE',
+            speed: 0
         };
 
-        // Salva no DB (se falhar, o dbService trata e continuamos)
         await registerDriverInDB(newDriver);
         
-        // Salva Localmente
         localStorage.setItem(STORAGE_KEY_DRIVER, newDriverId);
         localStorage.setItem(STORAGE_KEY_VIEW, AppView.DRIVER);
 
@@ -132,9 +126,7 @@ const App: React.FC = () => {
         setCurrentView(AppView.DRIVER);
         requestLocation();
     } catch (error) {
-        console.error("Erro no login:", error);
         alert("Erro ao conectar, mas iniciando em modo offline.");
-        // Fallback para login mesmo com erro
         setCurrentView(AppView.DRIVER);
     } finally {
         setIsLoginLoading(false);
@@ -158,14 +150,15 @@ const App: React.FC = () => {
       localStorage.removeItem(STORAGE_KEY_VIEW);
       setCurrentUserDriverId('');
       setCurrentView(AppView.LOGIN);
-      // Opcional: Remover driver do DB ao sair
-      // if (currentUserDriverId) deleteDriverFromDB(currentUserDriverId);
   };
 
   // --- GPS LOGIC ---
   useEffect(() => {
     let watchId: number;
-    if (currentView === AppView.DRIVER && currentUserDriverId) {
+    const currentDriver = drivers.find(d => d.id === currentUserDriverId);
+
+    // Só rastreia GPS se for motorista e NÃO estiver em intervalo
+    if (currentView === AppView.DRIVER && currentUserDriverId && currentDriver?.status !== 'BREAK') {
       if ("geolocation" in navigator) {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
@@ -182,8 +175,11 @@ const App: React.FC = () => {
                 let addressStr = currentSpeedKmH > 1 
                     ? `Em movimento - ${currentSpeedKmH.toFixed(0)} km/h`
                     : `Parado em: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+                
+                // Determina status baseado na velocidade
+                const status = currentSpeedKmH > 1 ? 'MOVING' : 'IDLE';
 
-                updateDriverLocationInDB(currentUserDriverId, latitude, longitude, addressStr);
+                updateDriverLocationInDB(currentUserDriverId, latitude, longitude, addressStr, status);
                 lastPositionRef.current = { lat: latitude, lng: longitude };
                 lastUpdateTimeRef.current = now;
             }
@@ -198,16 +194,19 @@ const App: React.FC = () => {
       }
     }
     return () => { if (watchId) navigator.geolocation.clearWatch(watchId); };
-  }, [currentView, currentUserDriverId]);
+  }, [currentView, currentUserDriverId, drivers]);
 
   const updateSingleDriverRoute = async (driverId: string, newRoute: DeliveryLocation[]) => {
       await updateDriverRouteInDB(driverId, newRoute);
       if (driverId === currentUserDriverId) setIsMobilePanelExpanded(false);
   };
 
-  const toggleDriverMovement = async (driverId: string) => {
+  const toggleDriverStatus = async (driverId: string) => {
       const driver = drivers.find(d => d.id === driverId);
-      if (driver) await setDriverMovingStatus(driverId, !driver.isMoving);
+      if (driver) {
+          const newStatus = driver.status === 'BREAK' ? 'IDLE' : 'BREAK';
+          await updateDriverStatusInDB(driverId, newStatus);
+      }
   };
 
   const completeDriverDelivery = async (driverId: string) => {
@@ -237,13 +236,12 @@ const App: React.FC = () => {
   };
 
   const currentUserDriver = drivers.find(d => d.id === currentUserDriverId) || drivers[0] || {
-      id: 'temp', name: inputDriverName, currentCoords: LOCATIONS_DB[0].coords, route: [], isMoving: false, currentAddress: ''
+      id: 'temp', name: inputDriverName, currentCoords: LOCATIONS_DB[0].coords, route: [], status: 'IDLE', isMoving: false, currentAddress: '', speed: 0
   };
 
   if (currentView === AppView.LOGIN) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden">
-        {/* Admin Login Modal */}
         {showAdminLogin && (
             <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl animate-in zoom-in-95">
@@ -265,7 +263,6 @@ const App: React.FC = () => {
             </div>
         )}
         
-        {/* Main Login Card */}
         <div className="bg-white/95 backdrop-blur-xl border border-white/20 rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center z-10 relative">
           <div className="flex justify-center mb-8">
               <H2Logo className="h-20" variant="dark" />
@@ -308,7 +305,6 @@ const App: React.FC = () => {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-slate-200">
-      {/* 1. MAP LAYER */}
       <div className="absolute inset-0 z-0">
         <LeafletMap 
             locations={locations} 
@@ -318,7 +314,6 @@ const App: React.FC = () => {
         />
       </div>
 
-      {/* 2. TOP CONTROLS */}
       <div className="absolute top-4 right-4 z-30 flex flex-col items-end gap-2">
          <div className="flex gap-2">
             <div className="bg-white/90 backdrop-blur px-3 py-1.5 rounded-full shadow-sm border border-white/50 text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2">
@@ -336,7 +331,6 @@ const App: React.FC = () => {
          )}
       </div>
 
-      {/* 3. RESPONSIVE PANEL */}
       <div 
         className={`
             absolute z-20 bg-white shadow-2xl transition-all duration-500 ease-in-out flex flex-col
@@ -356,7 +350,7 @@ const App: React.FC = () => {
                     <DriverView 
                         driverState={currentUserDriver}
                         updateRoute={(route) => updateSingleDriverRoute(currentUserDriverId, route)}
-                        toggleMovement={() => toggleDriverMovement(currentUserDriverId)}
+                        toggleStatus={() => toggleDriverStatus(currentUserDriverId)}
                         completeDelivery={() => completeDriverDelivery(currentUserDriverId)}
                     />
                 ) : (

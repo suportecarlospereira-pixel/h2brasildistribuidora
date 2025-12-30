@@ -1,3 +1,4 @@
+// NOME DO ARQUIVO: constants.ts
 import { DeliveryLocation, DriverState, LocationType, RouteHistory } from './types';
 
 // Coordinates for Itajaí, SC
@@ -13,7 +14,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
     coords: { lat: -26.9350, lng: -48.6800 },
     status: 'COMPLETED'
   },
-  // PONTOS ESPECIAIS
+  // PONTOS DE CULTURA
   {
     id: 'teatro-municipal',
     name: 'Teatro Municipal de Itajaí',
@@ -22,7 +23,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
     coords: { lat: -26.9126, lng: -48.6550 },
     status: 'PENDING'
   },
-  // UBS (Unidades Básicas de Saúde)
+  // UBS - Unidades Básicas de Saúde (Endereços Verificados)
   {
     id: 'ubs-cordeiros',
     name: 'UBS Cordeiros',
@@ -96,7 +97,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
     status: 'PENDING'
   },
   {
-    id: 'ubs-imaruí',
+    id: 'ubs-imarui',
     name: 'UBS Imaruí',
     address: 'R. Leodegário Pedro da Silva - Imaruí',
     type: LocationType.UBS,
@@ -127,11 +128,10 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
     coords: { lat: -26.8800, lng: -48.6880 },
     status: 'PENDING'
   },
-  // Novas UBS adicionadas na revisão
   {
     id: 'ubs-rio-bonito',
     name: 'UBS Rio Bonito',
-    address: 'R. Nilson Edson dos Santos, s/n - São Vicente',
+    address: 'R. Nilson Edson dos Santos - São Vicente',
     type: LocationType.UBS,
     coords: { lat: -26.8920, lng: -48.7050 },
     status: 'PENDING'
@@ -139,7 +139,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-costa-cavalcante',
     name: 'UBS Costa Cavalcante',
-    address: 'R. Espírito Santo, s/n - Cordeiros',
+    address: 'R. Espírito Santo - Cordeiros',
     type: LocationType.UBS,
     coords: { lat: -26.8850, lng: -48.6750 },
     status: 'PENDING'
@@ -153,7 +153,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
     status: 'PENDING'
   },
 
-  // CRAS (Centro de Referência de Assistência Social)
+  // CRAS
   {
     id: 'cras-itaipava',
     name: 'CRAS Itaipava',
@@ -207,26 +207,14 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
 export const MOCK_DRIVERS_LIST: DriverState[] = [
   {
     id: 'driver-01',
-    name: 'João Silva',
-    currentCoords: LOCATIONS_DB[0].coords, // Starts at HQ
+    name: 'João Silva (Demo)',
+    currentCoords: LOCATIONS_DB[0].coords,
     currentAddress: 'Aguardando início...',
     route: [],
-    isMoving: false,
-    speed: 0.0005
-  },
-  {
-    id: 'driver-02',
-    name: 'Maria Oliveira',
-    currentCoords: { lat: -26.9100, lng: -48.6700 }, // Starts near center
-    currentAddress: 'Aguardando início...',
-    route: [],
-    isMoving: false,
-    speed: 0.0006
+    status: 'IDLE',
+    speed: 0
   }
 ];
-
-// Keep for backward compatibility if needed, but prefer list above
-export const MOCK_DRIVER_INITIAL = MOCK_DRIVERS_LIST[0];
 
 export const MOCK_HISTORY: RouteHistory[] = [
   {
@@ -239,15 +227,7 @@ export const MOCK_HISTORY: RouteHistory[] = [
   },
   {
     id: 'hist-002',
-    date: '2023-10-26',
-    driverName: 'Carlos Souza',
-    totalDeliveries: 2,
-    locations: ['UBS Fazenda', 'UBS São Vicente'],
-    status: 'COMPLETED'
-  },
-  {
-    id: 'hist-003',
-    date: new Date().toISOString().split('T')[0], // Today
+    date: new Date().toISOString().split('T')[0],
     driverName: 'João Silva',
     totalDeliveries: 4,
     locations: ['CRAS Itaipava', 'CRAS Promorar'],
