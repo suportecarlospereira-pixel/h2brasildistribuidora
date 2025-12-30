@@ -5,28 +5,11 @@ import L from 'leaflet';
 import { DeliveryLocation, DriverState, LocationType } from '../types';
 import { ITAJAI_CENTER } from '../constants';
 
-const shadowUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
-
-const MapController: React.FC<{ center: [number, number], zoom: number, driverId?: string }> = ({ center, zoom, driverId }) => {
-    const map = useMap();
-    const lastDriverId = useRef<string | undefined>();
-    const isFirstLoad = useRef(true);
-
-    useEffect(() => {
-        const hasDriverChanged = driverId !== lastDriverId.current;
-        if (hasDriverChanged || isFirstLoad.current) {
-            map.flyTo(center, zoom, { duration: 1.2, easeLinearity: 0.25 });
-            lastDriverId.current = driverId;
-            isFirstLoad.current = false;
-        }
-    }, [center, zoom, map, driverId]);
-
-    return null;
-};
-
+// Ícones Customizados
 const hqIcon = new L.Icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-black.png',
-    shadowUrl, iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
 });
 
 const createNumberedIcon = (number: number, isNext: boolean) => {
@@ -57,6 +40,24 @@ const createDriverIcon = (colorHex: string, isSelected: boolean) => {
     });
 };
 
+// Controlador de Câmera Suave
+const MapController: React.FC<{ center: [number, number], zoom: number, driverId?: string }> = ({ center, zoom, driverId }) => {
+    const map = useMap();
+    const lastDriverId = useRef<string | undefined>();
+    const isFirstLoad = useRef(true);
+
+    useEffect(() => {
+        const hasDriverChanged = driverId !== lastDriverId.current;
+        if (hasDriverChanged || isFirstLoad.current) {
+            map.flyTo(center, zoom, { duration: 1.5, easeLinearity: 0.25 });
+            lastDriverId.current = driverId;
+            isFirstLoad.current = false;
+        }
+    }, [center, zoom, map, driverId]);
+
+    return null;
+};
+
 interface MapProps {
     locations: DeliveryLocation[];
     drivers: DriverState[];
@@ -80,12 +81,20 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
 
     return (
         <div className="w-full h-full relative overflow-hidden bg-slate-200">
-            <MapContainer ref={mapRef} center={ITAJAI_CENTER} zoom={13} className="w-full h-full" zoomControl={false}>
+            <MapContainer ref={mapRef} center={ITAJAI_CENTER} zoom={13} className="w-full h-full" zoomControl={false} scrollWheelZoom={true}>
                 <MapController center={centerPos} zoom={15} driverId={currentDriverId} />
-                <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                
+                {/* TILE LAYER OTIMIZADA: CARTO VOYAGER (Mais rápido que OSM) + BUFFER (Evita tela cinza) */}
+                <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    keepBuffer={10} 
+                    updateWhenIdle={false}
+                    updateWhenZooming={false}
+                />
                 
                 {locations.map(loc => (
-                    <Marker key={loc.id} position={[loc.coords.lat, loc.coords.lng]} icon={loc.type === LocationType.HEADQUARTERS ? hqIcon : L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize: [20, 32], iconAnchor: [10, 32] })}>
+                    <Marker key={loc.id} position={[loc.coords.lat, loc.coords.lng]} icon={loc.type === 'HEADQUARTERS' ? hqIcon : L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize: [20, 32], iconAnchor: [10, 32] })}>
                         <Popup><span className="font-bold">{loc.name}</span></Popup>
                     </Marker>
                 ))}
@@ -104,17 +113,10 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
                                 <Marker key={`${driver.id}-stop-${stop.id}`} position={[stop.coords.lat, stop.coords.lng]} icon={createNumberedIcon(stopIdx + 1, isSelected && stopIdx === 0)} zIndexOffset={isSelected ? 2000 : 100} />
                             ))}
 
-                            {/* ROTA COM LINHA SÓLIDA E PROFISSIONAL */}
                             {driver.route.length > 0 && (
                                 <Polyline 
                                     positions={[[driver.currentCoords.lat, driver.currentCoords.lng] as [number, number], ...driver.route.map(r => [r.coords.lat, r.coords.lng] as [number, number])]} 
-                                    pathOptions={{ 
-                                        color: color, 
-                                        weight: isSelected ? 6 : 4, // Mais grossa
-                                        opacity: isSelected ? 0.9 : 0.5, // Mais visível
-                                        lineCap: 'round', // Pontas arredondadas
-                                        lineJoin: 'round'
-                                    }} 
+                                    pathOptions={{ color, weight: isSelected ? 6 : 4, opacity: isSelected ? 0.9 : 0.5, lineCap: 'round', lineJoin: 'round' }} 
                                 />
                             )}
                         </React.Fragment>
