@@ -1,8 +1,9 @@
+// NOME DO ARQUIVO: App.tsx
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { LeafletMap } from './components/LeafletMap';
 import { AppView, DriverState, DeliveryLocation } from './types';
-import { LOCATIONS_DB, MOCK_DRIVERS_LIST } from './constants';
-import { LogOut, ChevronUp, ChevronDown, Crosshair, AlertTriangle, UserCircle, Lock, ShieldCheck, Loader2 } from 'lucide-react';
+import { LOCATIONS_DB } from './constants';
+import { LogOut, ChevronUp, ChevronDown, UserCircle, Lock, ShieldCheck, Loader2 } from 'lucide-react';
 import { distributeAndOptimizeRoutes } from './services/geminiService';
 import { H2Logo } from './components/Logo';
 import { 
@@ -13,22 +14,24 @@ import {
     updateDriverRouteInDB, 
     setDriverMovingStatus,
     seedDatabaseIfEmpty,
-    updateLocationStatusInDB
+    updateLocationStatusInDB,
+    getDriverById
 } from './services/dbService';
-import { isConfigured } from './firebaseConfig';
 
 // Lazy load view components
 const DriverView = lazy(() => import('./components/DriverView').then(m => ({ default: m.DriverView })));
 const AdminView = lazy(() => import('./components/AdminView').then(m => ({ default: m.AdminView })));
 
 const ADMIN_PASSWORD = "lulaladrao";
+const STORAGE_KEY_DRIVER = "H2_DRIVER_ID";
+const STORAGE_KEY_VIEW = "H2_LAST_VIEW";
 
 const LoadingFallback = () => (
   <div className="flex flex-col items-center justify-center h-full w-full bg-white space-y-4 p-8 text-center">
     <Loader2 className="w-10 h-10 text-emerald-600 animate-spin" />
     <div>
-      <p className="font-bold text-slate-800">Carregando interface...</p>
-      <p className="text-sm text-slate-500">Preparando ferramentas inteligentes</p>
+      <p className="font-bold text-slate-800">Carregando sistema...</p>
+      <p className="text-sm text-slate-500">Sincronizando dados logísticos</p>
     </div>
   </div>
 );
@@ -42,6 +45,7 @@ const App: React.FC = () => {
   
   const [currentUserDriverId, setCurrentUserDriverId] = useState<string>('');
   const [inputDriverName, setInputDriverName] = useState('');
+  const [isLoginLoading, setIsLoginLoading] = useState(false); // Novo estado de loading
   
   // Admin Login State
   const [showAdminLogin, setShowAdminLogin] = useState(false);
@@ -58,7 +62,32 @@ const App: React.FC = () => {
   // --- INITIALIZATION ---
   useEffect(() => {
     seedDatabaseIfEmpty();
-    // A subscrição agora é soberana: se vier vazio do DB, mostra vazio.
+
+    // Tentar restaurar sessão anterior
+    const restoreSession = async () => {
+        const savedDriverId = localStorage.getItem(STORAGE_KEY_DRIVER);
+        const savedView = localStorage.getItem(STORAGE_KEY_VIEW);
+
+        if (savedDriverId && savedView === AppView.DRIVER) {
+            setIsLoginLoading(true);
+            // Tenta verificar se o motorista ainda existe no DB, senão cria mock local
+            const existingDriver = await getDriverById(savedDriverId);
+            if (existingDriver) {
+                setCurrentUserDriverId(savedDriverId);
+                setCurrentView(AppView.DRIVER);
+            } else {
+                // Sessão inválida ou expirada
+                localStorage.removeItem(STORAGE_KEY_DRIVER);
+                localStorage.removeItem(STORAGE_KEY_VIEW);
+            }
+            setIsLoginLoading(false);
+        } else if (savedView === AppView.ADMIN) {
+            setCurrentView(AppView.ADMIN);
+        }
+    };
+
+    restoreSession();
+
     const unsubscribeDrivers = subscribeToDrivers((data) => {
         setDrivers(data);
     });
@@ -74,36 +103,63 @@ const App: React.FC = () => {
   // --- ACTIONS ---
   const handleDriverLogin = async () => {
     if (!inputDriverName || !inputDriverName.trim()) {
-        alert("Olá! Para iniciar seu turno, precisamos saber quem é você. Preencha seu nome.");
+        alert("Por favor, digite seu nome para iniciar.");
         return;
     }
     
-    const newDriverId = `driver-${Date.now()}`;
-    const newDriver: DriverState = {
-        id: newDriverId,
-        name: inputDriverName.trim(),
-        currentCoords: LOCATIONS_DB[0].coords,
-        currentAddress: 'Iniciando turno...',
-        route: [],
-        isMoving: false,
-        speed: 0.0005
-    };
+    setIsLoginLoading(true); // Ativa spinner
 
-    await registerDriverInDB(newDriver);
-    setCurrentUserDriverId(newDriverId);
-    setCurrentView(AppView.DRIVER);
-    requestLocation();
+    try {
+        const newDriverId = `driver-${Date.now()}`;
+        const newDriver: DriverState = {
+            id: newDriverId,
+            name: inputDriverName.trim(),
+            currentCoords: LOCATIONS_DB[0].coords,
+            currentAddress: 'Iniciando turno...',
+            route: [],
+            isMoving: false,
+            speed: 0.0005
+        };
+
+        // Salva no DB (se falhar, o dbService trata e continuamos)
+        await registerDriverInDB(newDriver);
+        
+        // Salva Localmente
+        localStorage.setItem(STORAGE_KEY_DRIVER, newDriverId);
+        localStorage.setItem(STORAGE_KEY_VIEW, AppView.DRIVER);
+
+        setCurrentUserDriverId(newDriverId);
+        setCurrentView(AppView.DRIVER);
+        requestLocation();
+    } catch (error) {
+        console.error("Erro no login:", error);
+        alert("Erro ao conectar, mas iniciando em modo offline.");
+        // Fallback para login mesmo com erro
+        setCurrentView(AppView.DRIVER);
+    } finally {
+        setIsLoginLoading(false);
+    }
   };
 
   const handleAdminLoginSubmit = () => {
       if (adminPasswordInput === ADMIN_PASSWORD) {
           setCurrentView(AppView.ADMIN);
+          localStorage.setItem(STORAGE_KEY_VIEW, AppView.ADMIN);
           setShowAdminLogin(false);
           setAdminError('');
           setAdminPasswordInput('');
       } else {
           setAdminError('Senha incorreta.');
       }
+  };
+
+  const handleLogout = () => {
+      localStorage.removeItem(STORAGE_KEY_DRIVER);
+      localStorage.removeItem(STORAGE_KEY_VIEW);
+      setCurrentUserDriverId('');
+      setCurrentView(AppView.LOGIN);
+      // Opcional: Remover driver do DB ao sair
+      // if (currentUserDriverId) deleteDriverFromDB(currentUserDriverId);
   };
 
   // --- GPS LOGIC ---
@@ -176,15 +232,18 @@ const App: React.FC = () => {
 
   const requestLocation = () => {
     if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(() => setGpsError(null), () => alert("Por favor, permita a localização."));
+        navigator.geolocation.getCurrentPosition(() => setGpsError(null), () => alert("Por favor, permita a localização para o monitoramento funcionar."));
     }
   };
 
-  const currentUserDriver = drivers.find(d => d.id === currentUserDriverId) || drivers[0];
+  const currentUserDriver = drivers.find(d => d.id === currentUserDriverId) || drivers[0] || {
+      id: 'temp', name: inputDriverName, currentCoords: LOCATIONS_DB[0].coords, route: [], isMoving: false, currentAddress: ''
+  };
 
   if (currentView === AppView.LOGIN) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden">
+        {/* Admin Login Modal */}
         {showAdminLogin && (
             <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl animate-in zoom-in-95">
@@ -205,27 +264,43 @@ const App: React.FC = () => {
                 </div>
             </div>
         )}
+        
+        {/* Main Login Card */}
         <div className="bg-white/95 backdrop-blur-xl border border-white/20 rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center z-10 relative">
           <div className="flex justify-center mb-8">
               <H2Logo className="h-20" variant="dark" />
           </div>
-          <div className="space-y-4">
-            <button onClick={() => setShowAdminLogin(true)} className="w-full py-4 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 transition font-bold text-lg shadow-sm flex items-center justify-center gap-2">
-              <Lock className="w-4 h-4 text-slate-400" /> Admin
-            </button>
-            <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <UserCircle className="text-slate-400 w-5 h-5" />
-                </div>
-                <input 
-                    type="text" placeholder="Nome do Motorista" value={inputDriverName}
-                    onChange={(e) => setInputDriverName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleDriverLogin(); }}
-                    className="w-full pl-10 pr-4 py-4 bg-slate-50 border border-slate-300 text-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
-                />
+          
+          {isLoginLoading ? (
+            <div className="py-10 flex flex-col items-center">
+                <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mb-3" />
+                <p className="text-sm font-bold text-slate-500">Iniciando sistema...</p>
             </div>
-            <button onClick={handleDriverLogin} className="w-full py-4 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition font-bold text-lg shadow-lg shadow-emerald-200 active:scale-95">Iniciar Turno</button>
-          </div>
+          ) : (
+            <div className="space-y-4">
+                <button onClick={() => setShowAdminLogin(true)} className="w-full py-4 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 transition font-bold text-lg shadow-sm flex items-center justify-center gap-2">
+                <Lock className="w-4 h-4 text-slate-400" /> Admin
+                </button>
+                <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <UserCircle className="text-slate-400 w-5 h-5" />
+                    </div>
+                    <input 
+                        type="text" placeholder="Nome do Motorista" value={inputDriverName}
+                        onChange={(e) => setInputDriverName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleDriverLogin(); }}
+                        className="w-full pl-10 pr-4 py-4 bg-slate-50 border border-slate-300 text-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                    />
+                </div>
+                <button 
+                    onClick={handleDriverLogin} 
+                    disabled={isLoginLoading}
+                    className="w-full py-4 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition font-bold text-lg shadow-lg shadow-emerald-200 active:scale-95 disabled:opacity-50 disabled:scale-100"
+                >
+                    Iniciar Turno
+                </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -246,13 +321,19 @@ const App: React.FC = () => {
       {/* 2. TOP CONTROLS */}
       <div className="absolute top-4 right-4 z-30 flex flex-col items-end gap-2">
          <div className="flex gap-2">
-            <div className="bg-white/90 backdrop-blur px-3 py-1.5 rounded-full shadow-sm border border-white/50 text-xs font-bold text-slate-700 uppercase tracking-wide">
+            <div className="bg-white/90 backdrop-blur px-3 py-1.5 rounded-full shadow-sm border border-white/50 text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${gpsError ? 'bg-red-500' : 'bg-emerald-500'} animate-pulse`}></div>
                 {currentView === AppView.ADMIN ? 'Gestão' : 'Motorista'}
             </div>
-            <button onClick={() => setCurrentView(AppView.LOGIN)} className="bg-red-500/90 text-white p-1.5 rounded-full shadow-md hover:bg-red-600 transition-colors">
+            <button onClick={handleLogout} className="bg-red-500/90 text-white p-1.5 rounded-full shadow-md hover:bg-red-600 transition-colors" title="Sair">
                 <LogOut className="w-4 h-4" />
             </button>
          </div>
+         {gpsError && (
+             <div className="bg-red-50 text-red-600 px-3 py-1 rounded-lg text-[10px] font-bold border border-red-100 shadow-sm">
+                 ⚠️ {gpsError}
+             </div>
+         )}
       </div>
 
       {/* 3. RESPONSIVE PANEL */}
@@ -283,7 +364,7 @@ const App: React.FC = () => {
                         driverState={drivers[0]} 
                         allDrivers={drivers}
                         allLocations={locations}
-                        onDistributeRoutes={distributeRoutesToAllDrivers}
+                        onDistributeRoutes={distributeAndOptimizeRoutes ? distributeRoutesToAllDrivers : async () => alert("IA não configurada.")}
                     />
                 )}
               </Suspense>
