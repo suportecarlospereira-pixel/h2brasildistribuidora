@@ -24,28 +24,28 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const [isOptimizing, setIsOptimizing] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     
-    // Acumula histórico local
     const [completedRecords, setCompletedRecords] = useState<DeliveryRecord[]>([]);
     
-    // Modal
     const [showFinishModal, setShowFinishModal] = useState(false);
     const [finishStatus, setFinishStatus] = useState<'DELIVERED' | 'FAILED'>('DELIVERED');
     const [finishObs, setFinishObs] = useState('');
 
-    // --- CORREÇÃO CRÍTICA: LINK UNIVERSAL DO GOOGLE MAPS ---
+    // --- CORREÇÃO FINAL: LINK OFICIAL DO GOOGLE MAPS ---
     const openGoogleMapsRoute = () => {
         if (driverState.route.length === 0) return;
         
+        // Garante que as coordenadas estejam formatadas corretamente
         const origin = `${driverState.currentCoords.lat},${driverState.currentCoords.lng}`;
         const lastStop = driverState.route[driverState.route.length - 1];
         const destination = `${lastStop.coords.lat},${lastStop.coords.lng}`;
         
-        // Waypoints (Paradas intermediárias)
+        // Formata os pontos intermediários (waypoints)
         const waypoints = driverState.route.slice(0, -1)
             .map(loc => `${loc.coords.lat},${loc.coords.lng}`)
             .join('|');
             
-        // URL Oficial da API do Google Maps (Funciona em Android e iOS)
+        // URL da API Universal de Navegação do Google (Funciona em Android/iOS/Web)
+        // Documentação: https://developers.google.com/maps/documentation/urls/get-started#directions-action
         const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
         
         window.open(url, '_blank');
@@ -65,7 +65,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         setCompletedRecords([]); 
         
         try {
-            // Filtro manual para evitar erro de referência
+            // Filtro seguro usando string direta para evitar erros de referência
             const selectedLocations = LOCATIONS_DB.filter(l => selectedIds.has(l.id));
             let orderedRoute = selectedLocations;
 
@@ -112,7 +112,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
         const updatedRecords = [...completedRecords, newRecord];
         setCompletedRecords(updatedRecords);
 
-        // Se for a última, salva TUDO no histórico
         if (driverState.route.length === 1) {
             const historyItem: RouteHistory = {
                 id: `route-${Date.now()}`,
@@ -160,7 +159,10 @@ export const DriverView: React.FC<DriverViewProps> = ({
                             </div>
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase ml-1">Observação</label>
-                                <textarea value={finishObs} onChange={(e) => setFinishObs(e.target.value)} placeholder={finishStatus === 'DELIVERED' ? "Quem recebeu?" : "Motivo da falha?"} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 h-20 resize-none mt-1" />
+                                <div className="relative mt-1">
+                                    <MessageSquare className="w-4 h-4 absolute top-3 left-3 text-slate-400" />
+                                    <textarea value={finishObs} onChange={(e) => setFinishObs(e.target.value)} placeholder={finishStatus === 'DELIVERED' ? "Quem recebeu?" : "Motivo da falha?"} className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 h-20 resize-none" />
+                                </div>
                             </div>
                             <div className="flex gap-2 pt-2">
                                 <button onClick={() => setShowFinishModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl">Cancelar</button>
@@ -258,7 +260,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     <p className="text-xs text-slate-500 mb-6">Selecione os destinos. A IA otimizará a sequência.</p>
                     
                     <div className="grid grid-cols-1 gap-2">
-                        {/* Correção do LocationType para string para evitar erros de build */}
+                        {/* Correção para evitar erro de referência: usar string 'HEADQUARTERS' */}
                         {LOCATIONS_DB.filter(l => l.type !== 'HEADQUARTERS').map(loc => (
                             <div key={loc.id} onClick={() => toggleSelection(loc.id)} className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center justify-between transition-all active:scale-[0.98] ${selectedIds.has(loc.id) ? 'bg-emerald-50 border-emerald-500' : 'bg-white border-slate-100 hover:border-slate-300'}`}>
                                 <div className="overflow-hidden pr-4">
