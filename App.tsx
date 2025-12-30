@@ -18,6 +18,7 @@ import {
     getDriverById
 } from './services/dbService';
 
+// Carregamento lento para performance
 const DriverView = lazy(() => import('./components/DriverView').then(m => ({ default: m.DriverView })));
 const AdminView = lazy(() => import('./components/AdminView').then(m => ({ default: m.AdminView })));
 
@@ -38,12 +39,12 @@ const LoadingFallback = () => (
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.LOGIN);
   
-  // Dados em Tempo Real
+  // --- ESTADO GLOBAL ---
   const [drivers, setDrivers] = useState<DriverState[]>([]);
   const [locations, setLocations] = useState<DeliveryLocation[]>([]);
   
-  // Refs para acesso dentro do GPS sem reiniciar o efeito
-  const driversRef = useRef<DriverState[]>([]); 
+  // REF para acesso otimizado dentro do GPS (Evita re-render loops)
+  const driversRef = useRef<DriverState[]>([]);
   
   const [currentUserDriverId, setCurrentUserDriverId] = useState<string>('');
   const [inputDriverName, setInputDriverName] = useState('');
@@ -56,15 +57,16 @@ const App: React.FC = () => {
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [isMobilePanelExpanded, setIsMobilePanelExpanded] = useState(false);
 
+  // Refs para controle de atualização do GPS (Throttle)
   const lastPositionRef = useRef<{lat: number; lng: number} | null>(null);
   const lastUpdateTimeRef = useRef<number>(0);
 
-  // Mantém o ref sincronizado com o state
+  // Mantém a ref sincronizada com o estado, sem disparar efeitos colaterais
   useEffect(() => {
       driversRef.current = drivers;
   }, [drivers]);
 
-  // --- INITIALIZATION ---
+  // --- INICIALIZAÇÃO ---
   useEffect(() => {
     seedDatabaseIfEmpty();
 
@@ -90,25 +92,24 @@ const App: React.FC = () => {
 
     restoreSession();
 
-    const unsubscribeDrivers = subscribeToDrivers((data) => {
-        setDrivers(data);
-    });
-    const unsubscribeLocations = subscribeToLocations((data) => {
-        setLocations(data);
-    });
+    const unsubscribeDrivers = subscribeToDrivers((data) => setDrivers(data));
+    const unsubscribeLocations = subscribeToLocations((data) => setLocations(data));
+    
     return () => {
         unsubscribeDrivers();
         unsubscribeLocations();
     };
   }, []);
 
-  // --- ACTIONS ---
+  // --- AÇÕES DO SISTEMA ---
   const handleDriverLogin = async () => {
     if (!inputDriverName || !inputDriverName.trim()) {
         alert("Por favor, digite seu nome para iniciar.");
         return;
     }
+    
     setIsLoginLoading(true);
+
     try {
         const newDriverId = `driver-${Date.now()}`;
         const newDriver: DriverState = {
@@ -120,14 +121,18 @@ const App: React.FC = () => {
             status: 'IDLE',
             speed: 0
         };
+
         await registerDriverInDB(newDriver);
+        
         localStorage.setItem(STORAGE_KEY_DRIVER, newDriverId);
         localStorage.setItem(STORAGE_KEY_VIEW, AppView.DRIVER);
+
         setCurrentUserDriverId(newDriverId);
         setCurrentView(AppView.DRIVER);
+        // Força leitura inicial
         requestLocation();
     } catch (error) {
-        alert("Erro ao conectar, mas iniciando em modo offline.");
+        console.error("Login offline fallback", error);
         setCurrentView(AppView.DRIVER);
     } finally {
         setIsLoginLoading(false);
@@ -153,15 +158,16 @@ const App: React.FC = () => {
       setCurrentView(AppView.LOGIN);
   };
 
-  // --- OTIMIZAÇÃO DO GPS ---
+  // --- LÓGICA DE GPS OTIMIZADA (BATTERY SAVER) ---
   useEffect(() => {
     let watchId: number;
 
-    // Função interna para verificar status sem depender do state 'drivers'
+    // Função auxiliar para verificar status sem depender do array 'drivers'
     const shouldTrack = () => {
         if (currentView !== AppView.DRIVER || !currentUserDriverId) return false;
+        // Usa a REF para ler o estado mais recente sem reiniciar o efeito
         const driver = driversRef.current.find(d => d.id === currentUserDriverId);
-        // Se não achar o driver (recém logado) ou status não for BREAK, rastreia.
+        // Só rastreia se NÃO estiver em intervalo (BREAK)
         return !driver || driver.status !== 'BREAK';
     };
 
@@ -169,7 +175,7 @@ const App: React.FC = () => {
       if ("geolocation" in navigator) {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
-            // Verificação dupla dentro do callback
+            // Dupla checagem dentro do callback assíncrono
             if (!shouldTrack()) return;
 
             setGpsError(null);
@@ -177,38 +183,46 @@ const App: React.FC = () => {
             const now = Date.now();
             const lastPos = lastPositionRef.current;
             
-            // Filtro de distância (jitter filter)
+            // Filtro de Jitter: Só atualiza se moveu > 3 metros ou passou muito tempo
             const dist = lastPos 
                 ? Math.sqrt(Math.pow(latitude - lastPos.lat, 2) + Math.pow(longitude - lastPos.lng, 2))
                 : 1;
 
-            // Envia se: (Não tem ultima posição) OU (Moveu > 3 metros E passou 1.5s) OU (Passou 10s parado)
+            // Regra: Movimento detectado (>3m e >1.5s) OU Heartbeat a cada 10s
             if (!lastPos || (dist > 0.00003 && now - lastUpdateTimeRef.current > 1500) || (now - lastUpdateTimeRef.current > 10000)) {
                 const currentSpeedKmH = speed ? speed * 3.6 : 0;
-                let addressStr = currentSpeedKmH > 1 
+                
+                // Lógica de Status Automático (Se speed > 1km/h = MOVING)
+                const derivedStatus = currentSpeedKmH > 1 ? 'MOVING' : 'IDLE';
+                
+                let addressStr = derivedStatus === 'MOVING'
                     ? `Em movimento - ${currentSpeedKmH.toFixed(0)} km/h`
                     : `Parado em: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-                
-                const status = currentSpeedKmH > 1 ? 'MOVING' : 'IDLE';
 
-                updateDriverLocationInDB(currentUserDriverId, latitude, longitude, addressStr, status);
+                updateDriverLocationInDB(currentUserDriverId, latitude, longitude, addressStr, derivedStatus);
+                
                 lastPositionRef.current = { lat: latitude, lng: longitude };
                 lastUpdateTimeRef.current = now;
             }
           },
           (error) => {
-            let msg = "Erro de GPS";
-            if (error.code === 1) msg = "Permissão negada.";
+            let msg = "Sinal GPS Perdido";
+            if (error.code === 1) msg = "Permissão de GPS Negada";
             setGpsError(msg);
           },
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+          { 
+              enableHighAccuracy: true, 
+              timeout: 10000, 
+              maximumAge: 0 
+          }
         );
       }
     }
-    // Removemos 'drivers' das dependências para evitar reinicialização constante
+    // IMPORTANTE: Dependências vazias de 'drivers' evitam reinicialização do watchPosition
     return () => { if (watchId) navigator.geolocation.clearWatch(watchId); };
-  }, [currentView, currentUserDriverId]); // Dependências limpas
+  }, [currentView, currentUserDriverId]); 
 
+  // --- HANDLERS DE DADOS ---
   const updateSingleDriverRoute = async (driverId: string, newRoute: DeliveryLocation[]) => {
       await updateDriverRouteInDB(driverId, newRoute);
       if (driverId === currentUserDriverId) setIsMobilePanelExpanded(false);
@@ -217,14 +231,9 @@ const App: React.FC = () => {
   const toggleDriverStatus = async (driverId: string) => {
       const driver = drivers.find(d => d.id === driverId);
       if (driver) {
-          // Lógica de alternância inteligente
           const newStatus = driver.status === 'BREAK' ? 'IDLE' : 'BREAK';
-          
-          // Se estiver saindo do intervalo, forçamos uma atualização de GPS imediata no DB
-          if (newStatus === 'IDLE') {
-             requestLocation(); 
-          }
-          
+          // Se saiu do intervalo, força um update imediato
+          if (newStatus === 'IDLE') requestLocation();
           await updateDriverStatusInDB(driverId, newStatus);
       }
   };
@@ -254,20 +263,20 @@ const App: React.FC = () => {
         navigator.geolocation.getCurrentPosition(
             (pos) => {
                 setGpsError(null);
-                // Força atualização inicial ao logar/sair do intervalo
                 if(currentUserDriverId) {
                     updateDriverLocationInDB(currentUserDriverId, pos.coords.latitude, pos.coords.longitude, "Localizado", 'IDLE');
                 }
             }, 
-            () => alert("Por favor, permita a localização para o monitoramento funcionar.")
+            () => alert("Por favor, ative a localização no seu dispositivo.")
         );
     }
   };
 
   const currentUserDriver = drivers.find(d => d.id === currentUserDriverId) || drivers[0] || {
-      id: 'temp', name: inputDriverName, currentCoords: LOCATIONS_DB[0].coords, route: [], status: 'IDLE', isMoving: false, currentAddress: '', speed: 0
+      id: 'temp', name: inputDriverName, currentCoords: LOCATIONS_DB[0].coords, route: [], status: 'IDLE', speed: 0, currentAddress: ''
   };
 
+  // --- RENDER ---
   if (currentView === AppView.LOGIN) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden">
