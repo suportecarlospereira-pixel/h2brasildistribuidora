@@ -15,28 +15,24 @@ interface AdminViewProps {
 
 export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, onDistributeRoutes }) => {
     const [activeTab, setActiveTab] = useState<'LIVE' | 'HISTORY' | 'DISPATCH'>('LIVE');
-    
-    // IA
     const [assistantQuery, setAssistantQuery] = useState('');
     const [assistantResponse, setAssistantResponse] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     
-    // Exclusão
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
     
-    // Filtro de Data
+    // Filtro por Período
     const today = new Date().toISOString().split('T')[0];
     const [startDate, setStartDate] = useState<string>(today);
     const [endDate, setEndDate] = useState<string>(today);
     
-    // Dados
     const [historyData, setHistoryData] = useState<RouteHistory[]>([]);
     const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
-    const [selectedForDispatch, setSelectedForDispatch] = useState<Set<string>>(new Set());
-    const [isDistributing, setIsDistributing] = useState(false);
     
     const responseRef = useRef<HTMLDivElement>(null);
+    const [selectedForDispatch, setSelectedForDispatch] = useState<Set<string>>(new Set());
+    const [isDistributing, setIsDistributing] = useState(false);
 
     useEffect(() => {
         const unsubscribe = subscribeToHistory((data) => setHistoryData(data));
@@ -110,6 +106,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         return h.date >= startDate && h.date <= endDate;
     });
         
+    // Correção: Uso de string 'HEADQUARTERS'
     const pendingLocations = allLocations.filter(l => l.type !== 'HEADQUARTERS');
 
     return (
