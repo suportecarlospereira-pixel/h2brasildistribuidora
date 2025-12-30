@@ -12,7 +12,8 @@ import {
     deleteDoc,
     getDoc,
     limit,
-    where
+    where,
+    orderBy // Importante para garantir a ordem cronológica
 } from 'firebase/firestore';
 import { DeliveryLocation, DriverState, DriverStatus, RouteHistory } from '../types';
 import { LOCATIONS_DB, MOCK_DRIVERS_LIST } from '../constants';
@@ -23,7 +24,7 @@ const HISTORY_COLLECTION = 'history';
 
 const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; // 5 Dias
 
-// HELPER: Remove 'undefined' recursivamente para o Firebase não travar
+// HELPER: Sanitização para evitar erros no Firebase
 const sanitizeForFirestore = (obj: any): any => {
     return JSON.parse(JSON.stringify(obj, (key, value) => {
         return value === undefined ? null : value;
@@ -74,7 +75,7 @@ export const findDriverByName = async (name: string): Promise<DriverState | null
         }
         return null;
     } catch (e) {
-        console.error("Erro ao buscar motorista por nome:", e);
+        console.error("Erro ao buscar motorista:", e);
         return null;
     }
 }
@@ -158,11 +159,10 @@ export const saveRouteToHistoryDB = async (historyItem: RouteHistory) => {
     try {
         const docId = `history-${historyItem.driverName}-${Date.now()}`;
         const docRef = doc(db, HISTORY_COLLECTION, docId);
-        await setDoc(docRef, sanitizeForFirestore({ ...historyItem, id: docId }));
+        await setDoc(docRef, sanitizeForFirestore(historyItem));
     } catch (e) { console.error("Erro ao salvar histórico:", e); }
 };
 
-// NOVA FUNÇÃO: Excluir Relatório
 export const deleteRouteHistoryFromDB = async (historyId: string) => {
     if (!isConfigured) return;
     try {
@@ -176,24 +176,30 @@ export const deleteRouteHistoryFromDB = async (historyId: string) => {
 export const subscribeToHistory = (callback: (history: RouteHistory[]) => void) => {
     if (!isConfigured) return () => {};
     try {
-        // Aumentei o limite para 100 para ter mais histórico visível
-        const q = query(collection(db, HISTORY_COLLECTION), limit(100)); 
+        // MELHORIA: Ordena por data decrescente e aumenta limite para permitir relatórios longos
+        const q = query(
+            collection(db, HISTORY_COLLECTION), 
+            orderBy('date', 'desc'), 
+            limit(300)
+        ); 
+        
         return onSnapshot(q, (snapshot) => {
             const history: RouteHistory[] = [];
             snapshot.forEach((doc) => {
-                // Garante que o ID do documento venha no objeto
                 const data = doc.data() as RouteHistory;
                 history.push({ ...data, id: doc.id });
             });
-            history.sort((a, b) => {
-                // Ordenação mais robusta por timestamp reverso (mais novo primeiro)
-                const dateA = new Date(a.date).getTime();
-                const dateB = new Date(b.date).getTime();
-                // Se as datas forem iguais (mesmo dia), usa o ID (que tem timestamp) para desempatar
-                if (dateA === dateB) return b.id.localeCompare(a.id);
-                return dateB - dateA;
-            });
             callback(history);
+        }, (error) => {
+            // Fallback se faltar índice composto no Firebase (raro para queries simples)
+            console.warn("Fallback de ordenação:", error);
+            const qSimple = query(collection(db, HISTORY_COLLECTION), limit(100));
+            onSnapshot(qSimple, (snap) => {
+                const h: RouteHistory[] = [];
+                snap.forEach(d => h.push({ ...(d.data() as RouteHistory), id: d.id }));
+                h.sort((a, b) => b.date.localeCompare(a.date));
+                callback(h);
+            });
         });
     } catch (e) { return () => {}; }
 };
