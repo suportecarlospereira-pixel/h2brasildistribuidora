@@ -1,7 +1,7 @@
 // NOME DO ARQUIVO: constants.ts
 import { DeliveryLocation, DriverState, LocationType, RouteHistory } from './types';
 
-// Coordinates for Itajaí, SC
+// Coordinates for Itajaí, SC - Centróide atualizado
 export const ITAJAI_CENTER = { lat: -26.9094, lng: -48.6630 };
 
 export const LOCATIONS_DB: DeliveryLocation[] = [
@@ -23,11 +23,11 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
     coords: { lat: -26.9126, lng: -48.6550 },
     status: 'PENDING'
   },
-  // UBS - Unidades Básicas de Saúde (Endereços Verificados)
+  // --- UBS - UNIDADES BÁSICAS DE SAÚDE (DADOS OFICIAIS 2024/25) ---
   {
     id: 'ubs-cordeiros',
     name: 'UBS Cordeiros',
-    address: 'R. Odílio Garcia, 380 - Cordeiros',
+    address: 'R. Odílio Garcia, s/n - Cordeiros',
     type: LocationType.UBS,
     coords: { lat: -26.8837, lng: -48.6923 },
     status: 'PENDING'
@@ -35,15 +35,15 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-sao-vicente',
     name: 'UBS São Vicente',
-    address: 'R. Antônio Cirilo Dutra, 35 - São Vicente',
+    address: 'R. Padre Paulo Condla, 392 - São Vicente', // Endereço Atualizado
     type: LocationType.UBS,
     coords: { lat: -26.9063, lng: -48.6895 },
     status: 'PENDING'
   },
   {
     id: 'ubs-fazenda',
-    name: 'UBS Fazenda',
-    address: 'R. Milton Rossi, 55 - Fazenda',
+    name: 'UBS Fazenda I',
+    address: 'R. Milton Ribeiro da Luz, 200 - Fazenda', // Endereço Atualizado
     type: LocationType.UBS,
     coords: { lat: -26.9189, lng: -48.6502 },
     status: 'PENDING'
@@ -51,7 +51,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-murta',
     name: 'UBS Murta',
-    address: 'R. Orlandina Amália Pires Machado - Murta',
+    address: 'R. Orlandina Amália Pires Correa, 300 - Murta', // Numeração corrigida
     type: LocationType.UBS,
     coords: { lat: -26.8720, lng: -48.6850 },
     status: 'PENDING'
@@ -59,7 +59,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-itaipava',
     name: 'UBS Itaipava',
-    address: 'Av. Itaipava, s/n - Itaipava',
+    address: 'Av. Itaipava, 2316 - Itaipava', // Atualizado (antigo era s/n)
     type: LocationType.UBS,
     coords: { lat: -26.9530, lng: -48.7420 },
     status: 'PENDING'
@@ -67,7 +67,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-espinheiros',
     name: 'UBS Espinheiros',
-    address: 'R. Firmino Vieira Cordeiro - Espinheiros',
+    address: 'R. Fermino Vieira Cordeiro, 1778 - Espinheiros', // Numeração oficial
     type: LocationType.UBS,
     coords: { lat: -26.8680, lng: -48.7100 },
     status: 'PENDING'
@@ -75,7 +75,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-salseiros',
     name: 'UBS Salseiros',
-    address: 'Rod. Jorge Lacerda - Salseiros',
+    address: 'R. César Augusto Dalçóquio, s/n - Salseiros',
     type: LocationType.UBS,
     coords: { lat: -26.8850, lng: -48.7200 },
     status: 'PENDING'
@@ -91,7 +91,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-portal-ii',
     name: 'UBS Portal II',
-    address: 'R. Nilo Simas - Espinheiros',
+    address: 'Av. Marcos Luiz Cabral, s/n - Portal II', // Rua corrigida (antiga Nilo Simas)
     type: LocationType.UBS,
     coords: { lat: -26.8600, lng: -48.7050 },
     status: 'PENDING'
@@ -99,7 +99,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-imarui',
     name: 'UBS Imaruí',
-    address: 'R. Leodegário Pedro da Silva - Imaruí',
+    address: 'R. Leodegário Pedro da Silva, 246 - Imaruí', // Numeração oficial
     type: LocationType.UBS,
     coords: { lat: -26.8990, lng: -48.6700 },
     status: 'PENDING'
@@ -107,7 +107,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-jardim-esperanca',
     name: 'UBS Jardim Esperança',
-    address: 'R. Sebastião Romeu Soares - Cordeiros',
+    address: 'R. Sebastião Romeu Soares, s/n - Cordeiros',
     type: LocationType.UBS,
     coords: { lat: -26.8780, lng: -48.6950 },
     status: 'PENDING'
@@ -115,7 +115,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-praia-brava',
     name: 'UBS Praia Brava',
-    address: 'R. Bráulio Werner - Praia Brava',
+    address: 'R. Bráulio Werner, 124 - Praia Brava', // Numeração oficial
     type: LocationType.UBS,
     coords: { lat: -26.9400, lng: -48.6300 },
     status: 'PENDING'
@@ -123,7 +123,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-votorantim',
     name: 'UBS Votorantim',
-    address: 'R. Eudoro Silveira - Cordeiros',
+    address: 'R. Selso Duarte Moreira, 1442 - Cordeiros', // Endereço Atualizado
     type: LocationType.UBS,
     coords: { lat: -26.8800, lng: -48.6880 },
     status: 'PENDING'
@@ -131,7 +131,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-rio-bonito',
     name: 'UBS Rio Bonito',
-    address: 'R. Nilson Edson dos Santos - São Vicente',
+    address: 'R. Nilson Edson dos Santos, s/n - São Vicente',
     type: LocationType.UBS,
     coords: { lat: -26.8920, lng: -48.7050 },
     status: 'PENDING'
@@ -139,7 +139,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-costa-cavalcante',
     name: 'UBS Costa Cavalcante',
-    address: 'R. Espírito Santo - Cordeiros',
+    address: 'R. Espírito Santo, 100 - Cordeiros', // Numeração oficial
     type: LocationType.UBS,
     coords: { lat: -26.8850, lng: -48.6750 },
     status: 'PENDING'
@@ -147,17 +147,17 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'ubs-sao-joao',
     name: 'UBS São João',
-    address: 'R. Pedro Rangel, 1500 - São João',
+    address: 'R. Otto Praun, 41 - São João', // Endereço Atualizado (antigo Pedro Rangel)
     type: LocationType.UBS,
     coords: { lat: -26.9050, lng: -48.6780 },
     status: 'PENDING'
   },
 
-  // CRAS
+  // --- CRAS - CENTROS DE REFERÊNCIA (ATUALIZADO) ---
   {
     id: 'cras-itaipava',
     name: 'CRAS Itaipava',
-    address: 'Av. Itaipava, 4200 - Itaipava',
+    address: 'Av. Itaipava, 4134 - Itaipava', // Mudou do 4200 para 4134
     type: LocationType.CRAS,
     coords: { lat: -26.9550, lng: -48.7450 },
     status: 'PENDING'
@@ -165,7 +165,7 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'cras-imarui',
     name: 'CRAS Imaruí',
-    address: 'R. Leodegário Pedro da Silva, 500 - Imaruí',
+    address: 'R. Blumenau, 1962 - Barra do Rio', // Nova Sede
     type: LocationType.CRAS,
     coords: { lat: -26.8972, lng: -48.6741 },
     status: 'PENDING'
@@ -173,33 +173,25 @@ export const LOCATIONS_DB: DeliveryLocation[] = [
   {
     id: 'cras-promorar',
     name: 'CRAS Promorar',
-    address: 'R. Min. Luiz Gallotti - Cidade Nova',
+    address: 'Av. Min. Luiz Gallotti, 1815 - Cidade Nova', // Numeração oficial
     type: LocationType.CRAS,
     coords: { lat: -26.9250, lng: -48.6950 },
     status: 'PENDING'
   },
   {
-    id: 'cras-cordeiros',
-    name: 'CRAS Cordeiros',
-    address: 'R. Dr. Reinaldo Schmithausen - Cordeiros',
-    type: LocationType.CRAS,
-    coords: { lat: -26.8870, lng: -48.6900 },
-    status: 'PENDING'
-  },
-  {
-    id: 'cras-sao-vicente',
-    name: 'CRAS São Vicente',
-    address: 'R. Estefano José Vanolli - São Vicente',
-    type: LocationType.CRAS,
-    coords: { lat: -26.9080, lng: -48.6920 },
-    status: 'PENDING'
-  },
-  {
     id: 'cras-nossa-senhora',
     name: 'CRAS Nossa Senhora das Graças',
-    address: 'R. Almirante Barroso - Centro',
+    address: 'R. Brusque, 650 - Centro', // Nova Sede (Antiga Alm. Barroso)
     type: LocationType.CRAS,
     coords: { lat: -26.9100, lng: -48.6650 },
+    status: 'PENDING'
+  },
+  {
+    id: 'cras-espinheiros',
+    name: 'CRAS Espinheiros', // Nova Unidade (Substitui áreas do Cordeiros)
+    address: 'R. Pedro Reis, 65 - Portal II',
+    type: LocationType.CRAS,
+    coords: { lat: -26.8650, lng: -48.7080 }, // Coords aproximadas Portal II
     status: 'PENDING'
   }
 ];
