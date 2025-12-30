@@ -1,10 +1,10 @@
 // NOME DO ARQUIVO: components/DriverView.tsx
 import React, { useState } from 'react';
-import { DeliveryLocation, DriverState, LocationType, RouteHistory } from '../types';
+import { DeliveryLocation, DriverState, DeliveryRecord, RouteHistory } from '../types';
 import { LOCATIONS_DB } from '../constants';
 import { optimizeRouteOrder, getRouteBriefingAudio } from '../services/geminiService';
 import { saveRouteToHistoryDB } from '../services/dbService';
-import { Truck, Navigation, CheckCircle, Circle, MapPin, Loader2, Volume2, ShieldAlert, Coffee, PlayCircle, Map as MapIcon } from 'lucide-react';
+import { Truck, Navigation, CheckCircle, Circle, MapPin, Loader2, Volume2, ShieldAlert, Coffee, PlayCircle, Map as MapIcon, XCircle, CheckSquare, MessageSquare } from 'lucide-react';
 import { H2Logo } from './Logo';
 
 interface DriverViewProps {
@@ -24,8 +24,14 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const [isOptimizing, setIsOptimizing] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     
-    // --- ESTADO PARA ACUMULAR ENTREGAS REALIZADAS ---
-    const [completedLocations, setCompletedLocations] = useState<string[]>([]);
+    // --- ESTADOS DE ENTREGA ---
+    // Acumula o histórico localmente enquanto o motorista faz a rota
+    const [completedRecords, setCompletedRecords] = useState<DeliveryRecord[]>([]);
+    
+    // Estados do Modal de Finalização
+    const [showFinishModal, setShowFinishModal] = useState(false);
+    const [finishStatus, setFinishStatus] = useState<'DELIVERED' | 'FAILED'>('DELIVERED');
+    const [finishObs, setFinishObs] = useState('');
 
     const openGoogleMapsRoute = () => {
         if (driverState.route.length === 0) return;
@@ -48,8 +54,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         if (selectedIds.size === 0) return;
         setIsOptimizing(true);
         setErrorMsg(null);
-        // Reseta o histórico local ao iniciar nova rota
-        setCompletedLocations([]); 
+        setCompletedRecords([]); // Limpa histórico anterior
         
         try {
             const selectedLocations = LOCATIONS_DB.filter(l => selectedIds.has(l.id));
@@ -76,33 +81,47 @@ export const DriverView: React.FC<DriverViewProps> = ({
         }
     };
 
-    // --- LÓGICA DE FINALIZAÇÃO CORRIGIDA ---
-    const handleCompleteDelivery = async () => {
+    // --- LÓGICA DE CONFIRMAÇÃO ---
+    const handleOpenFinishModal = () => {
+        setFinishStatus('DELIVERED');
+        setFinishObs('');
+        setShowFinishModal(true);
+    };
+
+    const handleConfirmDelivery = async () => {
         if (driverState.route.length === 0) return;
 
         const currentLocation = driverState.route[0];
         
-        // 1. Adiciona o local atual à lista de concluídos
-        const updatedCompletedList = [...completedLocations, currentLocation.name];
-        setCompletedLocations(updatedCompletedList);
+        // Cria o registro detalhado
+        const newRecord: DeliveryRecord = {
+            locationId: currentLocation.id,
+            locationName: currentLocation.name,
+            timestamp: new Date().toISOString(),
+            status: finishStatus,
+            observation: finishObs || (finishStatus === 'DELIVERED' ? 'Recebido no local' : 'Motivo não informado')
+        };
 
-        // 2. Se for a ÚLTIMA entrega, salva o histórico com TUDO
+        const updatedRecords = [...completedRecords, newRecord];
+        setCompletedRecords(updatedRecords);
+
+        // Se for a última entrega, salva o histórico COMPLETO no DB
         if (driverState.route.length === 1) {
             const historyItem: RouteHistory = {
                 id: `route-${Date.now()}`,
                 date: new Date().toISOString().split('T')[0],
                 driverName: driverState.name,
-                totalDeliveries: updatedCompletedList.length,
-                locations: updatedCompletedList, // Lista completa acumulada
+                totalDeliveries: updatedRecords.filter(r => r.status === 'DELIVERED').length,
+                totalFailures: updatedRecords.filter(r => r.status === 'FAILED').length,
+                records: updatedRecords,
                 status: 'COMPLETED'
             };
             await saveRouteToHistoryDB(historyItem);
-            // Limpa a lista local após salvar
-            setCompletedLocations([]);
+            setCompletedRecords([]); // Limpa memória local após salvar
         }
         
-        // 3. Remove da rota ativa
-        completeDelivery();
+        setShowFinishModal(false);
+        completeDelivery(); // Remove visualmente da lista
     };
 
     const playBriefing = async () => {
@@ -116,9 +135,53 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const currentTarget = driverState.route[0];
     const isBreak = driverState.status === 'BREAK';
 
+    // ROTA ATIVA
     if (driverState.route.length > 0) {
         return (
-            <div className="flex flex-col h-full w-full bg-white">
+            <div className="flex flex-col h-full w-full bg-white relative">
+                
+                {/* --- MODAL DE FINALIZAÇÃO --- */}
+                {showFinishModal && (
+                    <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-in fade-in">
+                        <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4">
+                            <h3 className="font-bold text-lg text-slate-900 border-b pb-2">Finalizar Entrega</h3>
+                            
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={() => setFinishStatus('DELIVERED')}
+                                    className={`flex-1 py-3 rounded-xl font-bold text-sm border-2 transition-all flex flex-col items-center gap-1 ${finishStatus === 'DELIVERED' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 text-slate-400'}`}
+                                >
+                                    <CheckSquare className="w-6 h-6" /> Entregue
+                                </button>
+                                <button 
+                                    onClick={() => setFinishStatus('FAILED')}
+                                    className={`flex-1 py-3 rounded-xl font-bold text-sm border-2 transition-all flex flex-col items-center gap-1 ${finishStatus === 'FAILED' ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-100 text-slate-400'}`}
+                                >
+                                    <XCircle className="w-6 h-6" /> Não Entregue
+                                </button>
+                            </div>
+
+                            <div>
+                                <label className="text-xs font-bold text-slate-500 uppercase ml-1">Observação / Recebedor</label>
+                                <div className="relative mt-1">
+                                    <MessageSquare className="w-4 h-4 absolute top-3 left-3 text-slate-400" />
+                                    <textarea 
+                                        value={finishObs}
+                                        onChange={(e) => setFinishObs(e.target.value)}
+                                        placeholder={finishStatus === 'DELIVERED' ? "Quem recebeu? (Ex: João Portaria)" : "Motivo? (Ex: Fechado, Ninguém atendeu)"}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 h-20 resize-none"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                                <button onClick={() => setShowFinishModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl">Cancelar</button>
+                                <button onClick={handleConfirmDelivery} className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-xl shadow-lg">Confirmar</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <div className="flex-none p-5 bg-slate-900 text-white shadow-md flex justify-between items-center">
                     <div className="flex items-center gap-3">
                         <H2Logo className="h-6 w-auto" showText={false} variant="light" />
@@ -171,7 +234,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                             </button>
                             
                             <button 
-                                onClick={handleCompleteDelivery} 
+                                onClick={handleOpenFinishModal} 
                                 disabled={isBreak}
                                 className="py-4 bg-white text-slate-900 disabled:opacity-50 disabled:bg-slate-200 rounded-xl font-bold text-sm shadow-lg active:scale-95"
                             >
@@ -204,7 +267,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         );
     }
 
-    // TELA DE SELEÇÃO
+    // TELA DE SELEÇÃO (INÍCIO)
     return (
         <div className="flex flex-col h-full w-full bg-white">
             <div className="flex-none p-5 bg-slate-900 text-white shadow-md flex justify-between items-center">
