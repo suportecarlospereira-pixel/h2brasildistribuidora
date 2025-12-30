@@ -11,20 +11,19 @@ import {
     writeBatch,
     deleteDoc,
     getDoc,
-    orderBy,
-    limit
+    limit,
+    where
 } from 'firebase/firestore';
 import { DeliveryLocation, DriverState, DriverStatus, RouteHistory } from '../types';
 import { LOCATIONS_DB, MOCK_DRIVERS_LIST } from '../constants';
 
 const DRIVERS_COLLECTION = 'drivers';
 const LOCATIONS_COLLECTION = 'locations';
-const HISTORY_COLLECTION = 'history'; // Nova coleção
+const HISTORY_COLLECTION = 'history';
 
-// Configuração: Motoristas inativos há mais de 5 dias somem do mapa
-const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; 
+const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; // 5 Dias
 
-// HELPER: Remove 'undefined' recursivamente
+// HELPER: Remove 'undefined' recursivamente para o Firebase não travar
 const sanitizeForFirestore = (obj: any): any => {
     return JSON.parse(JSON.stringify(obj, (key, value) => {
         return value === undefined ? null : value;
@@ -50,6 +49,7 @@ export const seedDatabaseIfEmpty = async () => {
 };
 
 // --- MOTORISTAS ---
+
 export const getDriverById = async (driverId: string): Promise<DriverState | null> => {
     if (!isConfigured) return null;
     try {
@@ -63,6 +63,25 @@ export const getDriverById = async (driverId: string): Promise<DriverState | nul
         return null;
     }
 };
+
+// --- NOVA FUNÇÃO: VERIFICAR DUPLICIDADE ---
+export const findDriverByName = async (name: string): Promise<DriverState | null> => {
+    if (!isConfigured) return null;
+    try {
+        // Busca motorista pelo nome exato
+        const q = query(collection(db, DRIVERS_COLLECTION), where("name", "==", name));
+        const querySnapshot = await getDocs(q);
+        
+        if (!querySnapshot.empty) {
+            // Retorna o primeiro encontrado
+            return querySnapshot.docs[0].data() as DriverState;
+        }
+        return null;
+    } catch (e) {
+        console.error("Erro ao buscar motorista por nome:", e);
+        return null;
+    }
+}
 
 export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) => {
     if (!isConfigured) {
@@ -83,10 +102,7 @@ export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) =
                 });
                 callback(drivers);
             },
-            (error) => {
-                console.error("Erro stream motoristas:", error);
-                callback(MOCK_DRIVERS_LIST);
-            }
+            (error) => callback(MOCK_DRIVERS_LIST)
         );
     } catch (e) {
         callback(MOCK_DRIVERS_LIST);
@@ -112,19 +128,16 @@ export const updateDriverStatusInDB = async (driverId: string, status: DriverSta
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
         await updateDoc(driverRef, { status, lastSeen: Date.now() });
-    } catch (e) {
-        console.error("Erro status:", e);
-    }
+    } catch (e) { console.error(e); }
 };
 
 export const registerDriverInDB = async (driver: DriverState) => {
     if (!isConfigured) return;
     try {
         const data = sanitizeForFirestore({ ...driver, lastSeen: Date.now() });
+        // Usa setDoc com merge: Se já existir o ID, atualiza. Se não, cria.
         await setDoc(doc(db, DRIVERS_COLLECTION, driver.id), data, { merge: true });
-    } catch (e) {
-        console.error("Erro registro:", e);
-    }
+    } catch (e) { console.error("Erro registro:", e); }
 };
 
 export const deleteDriverFromDB = async (driverId: string) => {
@@ -140,53 +153,41 @@ export const updateDriverRouteInDB = async (driverId: string, route: DeliveryLoc
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
         const cleanRoute = sanitizeForFirestore(route);
         await updateDoc(driverRef, { route: cleanRoute, lastSeen: Date.now() });
-    } catch (e) {
-        console.error("Erro salvar rota:", e);
-        throw e;
-    }
+    } catch (e) { throw e; }
 };
 
-// --- HISTÓRICO (NOVO) ---
+// --- HISTÓRICO ---
 
-// Salva um relatório de rota concluída
 export const saveRouteToHistoryDB = async (historyItem: RouteHistory) => {
     if (!isConfigured) return;
     try {
-        const docId = `history-${historyItem.id}-${Date.now()}`;
+        // ID único baseado no driver e timestamp para evitar sobreposição
+        const docId = `history-${historyItem.driverName}-${Date.now()}`;
         const docRef = doc(db, HISTORY_COLLECTION, docId);
         await setDoc(docRef, sanitizeForFirestore(historyItem));
-    } catch (e) {
-        console.error("Erro ao salvar histórico:", e);
-    }
+    } catch (e) { console.error("Erro ao salvar histórico:", e); }
 };
 
-// O Admin escuta essa função para ver relatórios em tempo real
 export const subscribeToHistory = (callback: (history: RouteHistory[]) => void) => {
     if (!isConfigured) return () => {};
     try {
-        // Pega os últimos 50 registros ordenados por data (string ISO funciona para ordenação simples)
+        // Limita aos últimos 50 para performance
         const q = query(collection(db, HISTORY_COLLECTION), limit(50)); 
         return onSnapshot(q, (snapshot) => {
             const history: RouteHistory[] = [];
             snapshot.forEach((doc) => {
                 history.push(doc.data() as RouteHistory);
             });
-            // Ordenação manual por garantia (mais recente primeiro)
+            // Ordena pela data (mais recente primeiro)
             history.sort((a, b) => b.date.localeCompare(a.date));
             callback(history);
         });
-    } catch (e) {
-        console.error("Erro ao ler histórico:", e);
-        return () => {};
-    }
+    } catch (e) { return () => {}; }
 };
 
 // --- LOCAIS ---
 export const subscribeToLocations = (callback: (locations: DeliveryLocation[]) => void) => {
-    if (!isConfigured) {
-        callback(LOCATIONS_DB);
-        return () => {};
-    }
+    if (!isConfigured) { callback(LOCATIONS_DB); return () => {}; }
     const q = query(collection(db, LOCATIONS_COLLECTION));
     return onSnapshot(q, (snapshot) => {
         const locations: DeliveryLocation[] = [];
@@ -199,5 +200,5 @@ export const updateLocationStatusInDB = async (locationId: string, status: 'PEND
     if (!isConfigured) return;
     try {
         await updateDoc(doc(db, LOCATIONS_COLLECTION, locationId), { status });
-    } catch (e) { console.error(e); }
+    } catch (e) { }
 };
