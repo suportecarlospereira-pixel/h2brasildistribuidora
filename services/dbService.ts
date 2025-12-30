@@ -10,16 +10,21 @@ import {
     getDocs,
     writeBatch,
     deleteDoc,
-    getDoc
+    getDoc,
+    orderBy,
+    limit
 } from 'firebase/firestore';
-import { DeliveryLocation, DriverState, DriverStatus } from '../types';
+import { DeliveryLocation, DriverState, DriverStatus, RouteHistory } from '../types';
 import { LOCATIONS_DB, MOCK_DRIVERS_LIST } from '../constants';
 
 const DRIVERS_COLLECTION = 'drivers';
 const LOCATIONS_COLLECTION = 'locations';
-const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; // 5 Dias
+const HISTORY_COLLECTION = 'history'; // Nova coleção
 
-// HELPER: Remove 'undefined' recursivamente para o Firebase não travar
+// Configuração: Motoristas inativos há mais de 5 dias somem do mapa
+const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; 
+
+// HELPER: Remove 'undefined' recursivamente
 const sanitizeForFirestore = (obj: any): any => {
     return JSON.parse(JSON.stringify(obj, (key, value) => {
         return value === undefined ? null : value;
@@ -72,7 +77,6 @@ export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) =
                 const drivers: DriverState[] = [];
                 snapshot.forEach((doc) => {
                     const data = doc.data() as DriverState;
-                    // Filtro de Inatividade (5 dias)
                     if (!data.lastSeen || (now - data.lastSeen < INACTIVITY_THRESHOLD)) {
                         drivers.push(data);
                     }
@@ -80,7 +84,7 @@ export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) =
                 callback(drivers);
             },
             (error) => {
-                console.error("Erro no stream de motoristas:", error);
+                console.error("Erro stream motoristas:", error);
                 callback(MOCK_DRIVERS_LIST);
             }
         );
@@ -90,7 +94,6 @@ export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) =
     }
 };
 
-// Atualização de GPS (Frequente)
 export const updateDriverLocationInDB = async (driverId: string, lat: number, lng: number, address: string, status: DriverStatus = 'MOVING') => {
     if (!isConfigured) return;
     try {
@@ -101,19 +104,16 @@ export const updateDriverLocationInDB = async (driverId: string, lat: number, ln
             status: status,
             lastSeen: Date.now()
         });
-    } catch (e) {
-        // Silêncio em erros de GPS para não bloquear a UI
-    }
+    } catch (e) { }
 };
 
-// Atualização de Status (Pausa/Almoço)
 export const updateDriverStatusInDB = async (driverId: string, status: DriverStatus) => {
     if (!isConfigured) return;
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
         await updateDoc(driverRef, { status, lastSeen: Date.now() });
     } catch (e) {
-        console.error("Erro ao mudar status:", e);
+        console.error("Erro status:", e);
     }
 };
 
@@ -123,7 +123,7 @@ export const registerDriverInDB = async (driver: DriverState) => {
         const data = sanitizeForFirestore({ ...driver, lastSeen: Date.now() });
         await setDoc(doc(db, DRIVERS_COLLECTION, driver.id), data, { merge: true });
     } catch (e) {
-        console.error("Erro ao registrar:", e);
+        console.error("Erro registro:", e);
     }
 };
 
@@ -131,26 +131,53 @@ export const deleteDriverFromDB = async (driverId: string) => {
     if (!isConfigured) return;
     try {
         await deleteDoc(doc(db, DRIVERS_COLLECTION, driverId));
-    } catch (e) {
-        throw e;
-    }
+    } catch (e) { throw e; }
 };
 
-// ROTA (Crítico: Sanitização aplicada aqui)
 export const updateDriverRouteInDB = async (driverId: string, route: DeliveryLocation[]) => {
     if (!isConfigured) return;
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
-        // Garante que o objeto está limpo para o Firebase
         const cleanRoute = sanitizeForFirestore(route);
-        
-        await updateDoc(driverRef, { 
-            route: cleanRoute, 
-            lastSeen: Date.now() 
+        await updateDoc(driverRef, { route: cleanRoute, lastSeen: Date.now() });
+    } catch (e) {
+        console.error("Erro salvar rota:", e);
+        throw e;
+    }
+};
+
+// --- HISTÓRICO (NOVO) ---
+
+// Salva um relatório de rota concluída
+export const saveRouteToHistoryDB = async (historyItem: RouteHistory) => {
+    if (!isConfigured) return;
+    try {
+        const docId = `history-${historyItem.id}-${Date.now()}`;
+        const docRef = doc(db, HISTORY_COLLECTION, docId);
+        await setDoc(docRef, sanitizeForFirestore(historyItem));
+    } catch (e) {
+        console.error("Erro ao salvar histórico:", e);
+    }
+};
+
+// O Admin escuta essa função para ver relatórios em tempo real
+export const subscribeToHistory = (callback: (history: RouteHistory[]) => void) => {
+    if (!isConfigured) return () => {};
+    try {
+        // Pega os últimos 50 registros ordenados por data (string ISO funciona para ordenação simples)
+        const q = query(collection(db, HISTORY_COLLECTION), limit(50)); 
+        return onSnapshot(q, (snapshot) => {
+            const history: RouteHistory[] = [];
+            snapshot.forEach((doc) => {
+                history.push(doc.data() as RouteHistory);
+            });
+            // Ordenação manual por garantia (mais recente primeiro)
+            history.sort((a, b) => b.date.localeCompare(a.date));
+            callback(history);
         });
     } catch (e) {
-        console.error("Erro crítico ao salvar rota:", e);
-        throw e; // Lança para o UI tratar
+        console.error("Erro ao ler histórico:", e);
+        return () => {};
     }
 };
 
