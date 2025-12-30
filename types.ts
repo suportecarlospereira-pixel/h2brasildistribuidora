@@ -1,4 +1,5 @@
 // NOME DO ARQUIVO: types.ts
+
 export enum LocationType {
   UBS = 'UBS',
   CRAS = 'CRAS',
@@ -8,12 +9,20 @@ export enum LocationType {
   OTHER = 'OTHER'
 }
 
-// Novo sistema de status para maior controle
 export type DriverStatus = 'IDLE' | 'MOVING' | 'BREAK';
 
 export interface Coordinates {
   lat: number;
   lng: number;
+}
+
+// NOVA INTERFACE: Registro detalhado de cada parada
+export interface DeliveryRecord {
+  locationId: string;
+  locationName: string;
+  timestamp: string;
+  status: 'DELIVERED' | 'FAILED'; // Sucesso ou Falha
+  observation?: string; // "Recebido por João" ou "Local fechado"
 }
 
 export interface DeliveryLocation {
@@ -23,7 +32,7 @@ export interface DeliveryLocation {
   type: LocationType;
   coords: Coordinates;
   selected?: boolean;
-  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'SKIPPED';
 }
 
 export interface DriverState {
@@ -32,9 +41,9 @@ export interface DriverState {
   currentCoords: Coordinates;
   currentAddress: string;
   route: DeliveryLocation[];
-  status: DriverStatus; // Substitui isMoving por algo mais robusto
+  status: DriverStatus;
   speed: number;
-  lastSeen?: number; // Timestamp em milissegundos
+  lastSeen?: number;
 }
 
 export interface RouteHistory {
@@ -42,7 +51,8 @@ export interface RouteHistory {
   date: string;
   driverName: string;
   totalDeliveries: number;
-  locations: string[];
+  totalFailures: number; // Novo contador de falhas
+  records: DeliveryRecord[]; // Lista detalhada com obs
   status: 'COMPLETED' | 'PARTIAL';
 }
 
