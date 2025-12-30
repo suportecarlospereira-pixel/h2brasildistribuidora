@@ -1,7 +1,7 @@
 // NOME DO ARQUIVO: constants.ts
 import { DeliveryLocation, DriverState, LocationType, RouteHistory } from './types';
 
-// Centróide Geográfico de Itajaí
+// Centróide Geográfico de Itajaí (Referência)
 export const ITAJAI_CENTER = { lat: -26.9094, lng: -48.6630 };
 
 export const LOCATIONS_DB: DeliveryLocation[] = [
@@ -479,4 +479,5 @@ export const MOCK_DRIVERS_LIST: DriverState[] = [
     speed: 0
   }
 ];
+
 export const MOCK_HISTORY: RouteHistory[] = [];
