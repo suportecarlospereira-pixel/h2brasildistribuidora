@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { LeafletMap } from './components/LeafletMap';
 import { AppView, DriverState, DeliveryLocation } from './types';
 import { LOCATIONS_DB } from './constants';
-import { LogOut, ChevronUp, ChevronDown, UserCircle, Lock, ShieldCheck, Loader2 } from 'lucide-react';
+import { LogOut, ChevronUp, ChevronDown, UserCircle, Lock, ShieldCheck, Loader2, WifiOff } from 'lucide-react';
 import { distributeAndOptimizeRoutes } from './services/geminiService';
 import { H2Logo } from './components/Logo';
 import { 
@@ -15,10 +15,10 @@ import {
     updateDriverStatusInDB,
     seedDatabaseIfEmpty,
     updateLocationStatusInDB,
-    getDriverById
+    getDriverById,
+    findDriverByName // Função para checar duplicidade
 } from './services/dbService';
 
-// Carregamento lento para performance
 const DriverView = lazy(() => import('./components/DriverView').then(m => ({ default: m.DriverView })));
 const AdminView = lazy(() => import('./components/AdminView').then(m => ({ default: m.AdminView })));
 
@@ -31,20 +31,20 @@ const LoadingFallback = () => (
     <Loader2 className="w-10 h-10 text-emerald-600 animate-spin" />
     <div>
       <p className="font-bold text-slate-800">Carregando sistema...</p>
-      <p className="text-sm text-slate-500">Sincronizando dados logísticos</p>
+      <p className="text-sm text-slate-500">Sincronizando dados...</p>
     </div>
   </div>
 );
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.LOGIN);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   
-  // --- ESTADO GLOBAL ---
   const [drivers, setDrivers] = useState<DriverState[]>([]);
   const [locations, setLocations] = useState<DeliveryLocation[]>([]);
-  
-  // REF para acesso otimizado dentro do GPS (Evita re-render loops)
-  const driversRef = useRef<DriverState[]>([]);
+  const driversRef = useRef<DriverState[]>([]); 
+  const lastPositionRef = useRef<{lat: number; lng: number} | null>(null);
+  const lastUpdateTimeRef = useRef<number>(0);
   
   const [currentUserDriverId, setCurrentUserDriverId] = useState<string>('');
   const [inputDriverName, setInputDriverName] = useState('');
@@ -57,18 +57,16 @@ const App: React.FC = () => {
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [isMobilePanelExpanded, setIsMobilePanelExpanded] = useState(false);
 
-  // Refs para controle de atualização do GPS (Throttle)
-  const lastPositionRef = useRef<{lat: number; lng: number} | null>(null);
-  const lastUpdateTimeRef = useRef<number>(0);
+  useEffect(() => { driversRef.current = drivers; }, [drivers]);
 
-  // Mantém a ref sincronizada com o estado, sem disparar efeitos colaterais
-  useEffect(() => {
-      driversRef.current = drivers;
-  }, [drivers]);
-
-  // --- INICIALIZAÇÃO ---
+  // INICIALIZAÇÃO E AUTO-LOGIN
   useEffect(() => {
     seedDatabaseIfEmpty();
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
     const restoreSession = async () => {
         const savedDriverId = localStorage.getItem(STORAGE_KEY_DRIVER);
@@ -76,11 +74,14 @@ const App: React.FC = () => {
 
         if (savedDriverId && savedView === AppView.DRIVER) {
             setIsLoginLoading(true);
+            // Verifica se o motorista ainda existe no banco
             const existingDriver = await getDriverById(savedDriverId);
+            
             if (existingDriver) {
                 setCurrentUserDriverId(savedDriverId);
                 setCurrentView(AppView.DRIVER);
             } else {
+                // Se não existe mais (foi deletado), limpa a sessão
                 localStorage.removeItem(STORAGE_KEY_DRIVER);
                 localStorage.removeItem(STORAGE_KEY_VIEW);
             }
@@ -98,42 +99,68 @@ const App: React.FC = () => {
     return () => {
         unsubscribeDrivers();
         unsubscribeLocations();
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
-  // --- AÇÕES DO SISTEMA ---
+  // LOGIN COM VERIFICAÇÃO DE DUPLICIDADE
   const handleDriverLogin = async () => {
-    if (!inputDriverName || !inputDriverName.trim()) {
-        alert("Por favor, digite seu nome para iniciar.");
-        return;
-    }
+    const trimmedName = inputDriverName.trim();
+    if (!trimmedName) return alert("Digite seu nome.");
     
     setIsLoginLoading(true);
 
     try {
-        const newDriverId = `driver-${Date.now()}`;
-        const newDriver: DriverState = {
-            id: newDriverId,
-            name: inputDriverName.trim(),
-            currentCoords: LOCATIONS_DB[0].coords,
-            currentAddress: 'Iniciando turno...',
-            route: [],
-            status: 'IDLE',
-            speed: 0
-        };
-
-        await registerDriverInDB(newDriver);
+        // 1. Verifica se já existe motorista com esse nome
+        const existingDriver = await findDriverByName(trimmedName);
         
-        localStorage.setItem(STORAGE_KEY_DRIVER, newDriverId);
+        let driverId = '';
+        let driverData: DriverState;
+
+        if (existingDriver) {
+            // Se já existe, pergunta se quer reassumir a conta
+            if (confirm(`Já existe um cadastro para "${trimmedName}". É você? Clique em OK para entrar.`)) {
+                driverId = existingDriver.id;
+                driverData = {
+                    ...existingDriver,
+                    lastSeen: Date.now(),
+                    status: 'IDLE' // Reseta status para segurança
+                };
+            } else {
+                // Se não é a pessoa, cancela para não duplicar nomes
+                alert("Por favor, use um nome diferente (ex: João Silva 2) para evitar confusão.");
+                setIsLoginLoading(false);
+                return; 
+            }
+        } else {
+            // Cria NOVO motorista
+            driverId = `driver-${Date.now()}`;
+            driverData = {
+                id: driverId,
+                name: trimmedName,
+                currentCoords: LOCATIONS_DB[0].coords,
+                currentAddress: 'Iniciando...',
+                route: [],
+                status: 'IDLE',
+                speed: 0
+            };
+        }
+
+        // Salva/Atualiza no Banco
+        await registerDriverInDB(driverData);
+        
+        // Salva Localmente (Persistência)
+        localStorage.setItem(STORAGE_KEY_DRIVER, driverId);
         localStorage.setItem(STORAGE_KEY_VIEW, AppView.DRIVER);
 
-        setCurrentUserDriverId(newDriverId);
+        setCurrentUserDriverId(driverId);
         setCurrentView(AppView.DRIVER);
-        // Força leitura inicial
         requestLocation();
+
     } catch (error) {
-        console.error("Login offline fallback", error);
-        setCurrentView(AppView.DRIVER);
+        console.error(error);
+        alert("Erro no login. Tente novamente.");
     } finally {
         setIsLoginLoading(false);
     }
@@ -158,16 +185,12 @@ const App: React.FC = () => {
       setCurrentView(AppView.LOGIN);
   };
 
-  // --- LÓGICA DE GPS OTIMIZADA (BATTERY SAVER) ---
+  // GPS
   useEffect(() => {
     let watchId: number;
-
-    // Função auxiliar para verificar status sem depender do array 'drivers'
     const shouldTrack = () => {
         if (currentView !== AppView.DRIVER || !currentUserDriverId) return false;
-        // Usa a REF para ler o estado mais recente sem reiniciar o efeito
         const driver = driversRef.current.find(d => d.id === currentUserDriverId);
-        // Só rastreia se NÃO estiver em intervalo (BREAK)
         return !driver || driver.status !== 'BREAK';
     };
 
@@ -175,54 +198,36 @@ const App: React.FC = () => {
       if ("geolocation" in navigator) {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
-            // Dupla checagem dentro do callback assíncrono
             if (!shouldTrack()) return;
-
             setGpsError(null);
+            
             const { latitude, longitude, speed } = position.coords;
             const now = Date.now();
             const lastPos = lastPositionRef.current;
-            
-            // Filtro de Jitter: Só atualiza se moveu > 3 metros ou passou muito tempo
-            const dist = lastPos 
-                ? Math.sqrt(Math.pow(latitude - lastPos.lat, 2) + Math.pow(longitude - lastPos.lng, 2))
-                : 1;
+            const dist = lastPos ? Math.sqrt(Math.pow(latitude - lastPos.lat, 2) + Math.pow(longitude - lastPos.lng, 2)) : 1;
 
-            // Regra: Movimento detectado (>3m e >1.5s) OU Heartbeat a cada 10s
             if (!lastPos || (dist > 0.00003 && now - lastUpdateTimeRef.current > 1500) || (now - lastUpdateTimeRef.current > 10000)) {
                 const currentSpeedKmH = speed ? speed * 3.6 : 0;
-                
-                // Lógica de Status Automático (Se speed > 1km/h = MOVING)
                 const derivedStatus = currentSpeedKmH > 1 ? 'MOVING' : 'IDLE';
-                
-                let addressStr = derivedStatus === 'MOVING'
-                    ? `Em movimento - ${currentSpeedKmH.toFixed(0)} km/h`
+                const addressStr = derivedStatus === 'MOVING' 
+                    ? `Em movimento - ${currentSpeedKmH.toFixed(0)} km/h` 
                     : `Parado em: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
 
                 updateDriverLocationInDB(currentUserDriverId, latitude, longitude, addressStr, derivedStatus);
-                
                 lastPositionRef.current = { lat: latitude, lng: longitude };
                 lastUpdateTimeRef.current = now;
             }
           },
           (error) => {
-            let msg = "Sinal GPS Perdido";
-            if (error.code === 1) msg = "Permissão de GPS Negada";
-            setGpsError(msg);
+            setGpsError(error.code === 1 ? "Permissão GPS Negada" : "Sinal GPS Perdido");
           },
-          { 
-              enableHighAccuracy: true, 
-              timeout: 10000, 
-              maximumAge: 0 
-          }
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
         );
       }
     }
-    // IMPORTANTE: Dependências vazias de 'drivers' evitam reinicialização do watchPosition
     return () => { if (watchId) navigator.geolocation.clearWatch(watchId); };
   }, [currentView, currentUserDriverId]); 
 
-  // --- HANDLERS DE DADOS ---
   const updateSingleDriverRoute = async (driverId: string, newRoute: DeliveryLocation[]) => {
       await updateDriverRouteInDB(driverId, newRoute);
       if (driverId === currentUserDriverId) setIsMobilePanelExpanded(false);
@@ -232,7 +237,6 @@ const App: React.FC = () => {
       const driver = drivers.find(d => d.id === driverId);
       if (driver) {
           const newStatus = driver.status === 'BREAK' ? 'IDLE' : 'BREAK';
-          // Se saiu do intervalo, força um update imediato
           if (newStatus === 'IDLE') requestLocation();
           await updateDriverStatusInDB(driverId, newStatus);
       }
@@ -263,11 +267,9 @@ const App: React.FC = () => {
         navigator.geolocation.getCurrentPosition(
             (pos) => {
                 setGpsError(null);
-                if(currentUserDriverId) {
-                    updateDriverLocationInDB(currentUserDriverId, pos.coords.latitude, pos.coords.longitude, "Localizado", 'IDLE');
-                }
+                if(currentUserDriverId) updateDriverLocationInDB(currentUserDriverId, pos.coords.latitude, pos.coords.longitude, "Localizado", 'IDLE');
             }, 
-            () => alert("Por favor, ative a localização no seu dispositivo.")
+            () => alert("Ative a localização.")
         );
     }
   };
@@ -276,10 +278,15 @@ const App: React.FC = () => {
       id: 'temp', name: inputDriverName, currentCoords: LOCATIONS_DB[0].coords, route: [], status: 'IDLE', speed: 0, currentAddress: ''
   };
 
-  // --- RENDER ---
   if (currentView === AppView.LOGIN) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden">
+        {!isOnline && (
+            <div className="absolute top-0 left-0 right-0 bg-red-600 text-white text-xs font-bold text-center py-2 z-50">
+                <WifiOff className="w-3 h-3 inline mr-1" /> SEM CONEXÃO COM A INTERNET
+            </div>
+        )}
+        
         {showAdminLogin && (
             <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-2xl animate-in zoom-in-95">
@@ -290,11 +297,7 @@ const App: React.FC = () => {
                         </h3>
                         <button onClick={() => setShowAdminLogin(false)} className="text-slate-400 hover:text-slate-600">✕</button>
                     </div>
-                    <input 
-                        type="password" autoFocus placeholder="Senha" value={adminPasswordInput}
-                        onChange={(e) => setAdminPasswordInput(e.target.value)}
-                        className="w-full bg-slate-100 border border-slate-300 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
+                    <input type="password" autoFocus placeholder="Senha" value={adminPasswordInput} onChange={(e) => setAdminPasswordInput(e.target.value)} className="w-full bg-slate-100 border border-slate-300 rounded-lg px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                     {adminError && <p className="text-red-500 text-xs font-bold mb-3">{adminError}</p>}
                     <button onClick={handleAdminLoginSubmit} className="w-full bg-emerald-600 text-white font-bold py-3 rounded-lg hover:bg-emerald-700 transition">Entrar</button>
                 </div>
@@ -302,38 +305,21 @@ const App: React.FC = () => {
         )}
         
         <div className="bg-white/95 backdrop-blur-xl border border-white/20 rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center z-10 relative">
-          <div className="flex justify-center mb-8">
-              <H2Logo className="h-20" variant="dark" />
-          </div>
+          <div className="flex justify-center mb-8"><H2Logo className="h-20" variant="dark" /></div>
           
           {isLoginLoading ? (
             <div className="py-10 flex flex-col items-center">
                 <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mb-3" />
-                <p className="text-sm font-bold text-slate-500">Iniciando sistema...</p>
+                <p className="text-sm font-bold text-slate-500">Buscando cadastro...</p>
             </div>
           ) : (
             <div className="space-y-4">
-                <button onClick={() => setShowAdminLogin(true)} className="w-full py-4 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 transition font-bold text-lg shadow-sm flex items-center justify-center gap-2">
-                <Lock className="w-4 h-4 text-slate-400" /> Admin
-                </button>
+                <button onClick={() => setShowAdminLogin(true)} className="w-full py-4 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 transition font-bold text-lg shadow-sm flex items-center justify-center gap-2"><Lock className="w-4 h-4 text-slate-400" /> Admin</button>
                 <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <UserCircle className="text-slate-400 w-5 h-5" />
-                    </div>
-                    <input 
-                        type="text" placeholder="Nome do Motorista" value={inputDriverName}
-                        onChange={(e) => setInputDriverName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleDriverLogin(); }}
-                        className="w-full pl-10 pr-4 py-4 bg-slate-50 border border-slate-300 text-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
-                    />
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><UserCircle className="text-slate-400 w-5 h-5" /></div>
+                    <input type="text" placeholder="Nome do Motorista" value={inputDriverName} onChange={(e) => setInputDriverName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleDriverLogin(); }} className="w-full pl-10 pr-4 py-4 bg-slate-50 border border-slate-300 text-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium" />
                 </div>
-                <button 
-                    onClick={handleDriverLogin} 
-                    disabled={isLoginLoading}
-                    className="w-full py-4 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition font-bold text-lg shadow-lg shadow-emerald-200 active:scale-95 disabled:opacity-50 disabled:scale-100"
-                >
-                    Iniciar Turno
-                </button>
+                <button onClick={handleDriverLogin} disabled={isLoginLoading} className="w-full py-4 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition font-bold text-lg shadow-lg shadow-emerald-200 active:scale-95 disabled:opacity-50 disabled:scale-100">Iniciar Turno</button>
             </div>
           )}
         </div>
@@ -343,13 +329,14 @@ const App: React.FC = () => {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-slate-200">
+      {!isOnline && (
+          <div className="absolute top-0 left-0 right-0 bg-red-600/90 backdrop-blur text-white text-[10px] font-bold text-center py-1 z-[100] animate-pulse">
+              <WifiOff className="w-3 h-3 inline mr-1" /> VOCÊ ESTÁ OFFLINE
+          </div>
+      )}
+
       <div className="absolute inset-0 z-0">
-        <LeafletMap 
-            locations={locations} 
-            drivers={drivers} 
-            currentDriverId={currentView === AppView.DRIVER ? currentUserDriverId : undefined}
-            isLayoutCompact={!isMobilePanelExpanded}
-        />
+        <LeafletMap locations={locations} drivers={drivers} currentDriverId={currentView === AppView.DRIVER ? currentUserDriverId : undefined} isLayoutCompact={!isMobilePanelExpanded} />
       </div>
 
       <div className="absolute top-4 right-4 z-30 flex flex-col items-end gap-2">
@@ -358,25 +345,14 @@ const App: React.FC = () => {
                 <div className={`w-2 h-2 rounded-full ${gpsError ? 'bg-red-500' : 'bg-emerald-500'} animate-pulse`}></div>
                 {currentView === AppView.ADMIN ? 'Gestão' : 'Motorista'}
             </div>
-            <button onClick={handleLogout} className="bg-red-500/90 text-white p-1.5 rounded-full shadow-md hover:bg-red-600 transition-colors" title="Sair">
-                <LogOut className="w-4 h-4" />
-            </button>
+            <button onClick={handleLogout} className="bg-red-500/90 text-white p-1.5 rounded-full shadow-md hover:bg-red-600 transition-colors" title="Sair"><LogOut className="w-4 h-4" /></button>
          </div>
          {gpsError && (
-             <div className="bg-red-50 text-red-600 px-3 py-1 rounded-lg text-[10px] font-bold border border-red-100 shadow-sm">
-                 ⚠️ {gpsError}
-             </div>
+             <div className="bg-red-50 text-red-600 px-3 py-1 rounded-lg text-[10px] font-bold border border-red-100 shadow-sm">⚠️ {gpsError}</div>
          )}
       </div>
 
-      <div 
-        className={`
-            absolute z-20 bg-white shadow-2xl transition-all duration-500 ease-in-out flex flex-col
-            md:top-4 md:left-4 md:bottom-4 md:w-[420px] md:rounded-3xl md:h-auto
-            bottom-0 left-0 right-0 rounded-t-3xl border-t border-slate-100
-            ${isMobilePanelExpanded ? 'h-[85vh]' : 'h-[25vh]'} md:h-[calc(100vh-2rem)]
-        `}
-      >
+      <div className={`absolute z-20 bg-white shadow-2xl transition-all duration-500 ease-in-out flex flex-col md:top-4 md:left-4 md:bottom-4 md:w-[420px] md:rounded-3xl md:h-auto bottom-0 left-0 right-0 rounded-t-3xl border-t border-slate-100 ${isMobilePanelExpanded ? 'h-[85vh]' : 'h-[25vh]'} md:h-[calc(100vh-2rem)]`}>
           <div className="md:hidden flex items-center justify-center p-3 cursor-pointer active:bg-slate-50 rounded-t-3xl touch-none" onClick={() => setIsMobilePanelExpanded(!isMobilePanelExpanded)}>
              <div className="w-12 h-1.5 bg-slate-200 rounded-full mb-1"></div>
              {isMobilePanelExpanded ? <ChevronDown className="w-5 h-5 text-slate-400 absolute right-4 top-3" /> : <ChevronUp className="w-5 h-5 text-slate-400 absolute right-4 top-3" />}
@@ -386,18 +362,13 @@ const App: React.FC = () => {
               <Suspense fallback={<LoadingFallback />}>
                 {currentView === AppView.DRIVER ? (
                     <DriverView 
-                        driverState={currentUserDriver}
-                        updateRoute={(route) => updateSingleDriverRoute(currentUserDriverId, route)}
-                        toggleStatus={() => toggleDriverStatus(currentUserDriverId)}
-                        completeDelivery={() => completeDriverDelivery(currentUserDriverId)}
+                        driverState={currentUserDriver} 
+                        updateRoute={(route) => updateSingleDriverRoute(currentUserDriverId, route)} 
+                        toggleStatus={() => toggleDriverStatus(currentUserDriverId)} 
+                        completeDelivery={() => completeDriverDelivery(currentUserDriverId)} 
                     />
                 ) : (
-                    <AdminView 
-                        driverState={drivers[0]} 
-                        allDrivers={drivers}
-                        allLocations={locations}
-                        onDistributeRoutes={distributeAndOptimizeRoutes ? distributeRoutesToAllDrivers : async () => alert("IA não configurada.")}
-                    />
+                    <AdminView driverState={drivers[0]} allDrivers={drivers} allLocations={locations} onDistributeRoutes={distributeAndOptimizeRoutes ? distributeRoutesToAllDrivers : async () => alert("IA não configurada.")} />
                 )}
               </Suspense>
           </div>
