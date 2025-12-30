@@ -2,10 +2,9 @@
 import React, { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { DeliveryLocation, DriverState, LocationType } from '../types';
+import { DeliveryLocation, DriverState } from '../types';
 import { ITAJAI_CENTER } from '../constants';
 
-// Ícones Customizados
 const hqIcon = new L.Icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-black.png',
     shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
@@ -17,11 +16,7 @@ const createNumberedIcon = (number: number, isNext: boolean) => {
     const size = isNext ? 'w-8 h-8' : 'w-6 h-6';
     return L.divIcon({
         className: 'numbered-marker',
-        html: `
-            <div class="${size} rounded-full bg-white border-2 flex items-center justify-center shadow-lg transform transition-transform" style="border-color: ${color}; color: ${color}; font-weight: 800;">
-                <span class="${isNext ? 'text-sm' : 'text-xs'}">${number}</span>
-            </div>
-        `,
+        html: `<div class="${size} rounded-full bg-white border-2 flex items-center justify-center shadow-lg" style="border-color: ${color}; color: ${color}; font-weight: 800;"><span class="${isNext ? 'text-sm' : 'text-xs'}">${number}</span></div>`,
         iconSize: [32, 32], iconAnchor: [16, 16],
     });
 };
@@ -29,18 +24,11 @@ const createNumberedIcon = (number: number, isNext: boolean) => {
 const createDriverIcon = (colorHex: string, isSelected: boolean) => {
     return new L.DivIcon({
         className: 'driver-marker',
-        html: `
-            <div style="background-color: ${colorHex};" class="w-10 h-10 rounded-full border-2 border-white shadow-xl flex items-center justify-center relative transition-transform ${isSelected ? 'scale-110 ring-4 ring-emerald-400/50' : ''}">
-                <svg viewBox="0 0 24 24" class="w-6 h-6 fill-white">
-                    <path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
-                </svg>
-            </div>
-        `,
+        html: `<div style="background-color: ${colorHex};" class="w-10 h-10 rounded-full border-2 border-white shadow-xl flex items-center justify-center relative ${isSelected ? 'scale-110 ring-4 ring-emerald-400/50' : ''}"><svg viewBox="0 0 24 24" class="w-6 h-6 fill-white"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg></div>`,
         iconSize: [40, 40], iconAnchor: [20, 20],
     });
 };
 
-// Controlador de Câmera Suave
 const MapController: React.FC<{ center: [number, number], zoom: number, driverId?: string }> = ({ center, zoom, driverId }) => {
     const map = useMap();
     const lastDriverId = useRef<string | undefined>();
@@ -67,11 +55,7 @@ interface MapProps {
 
 export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriverId, isLayoutCompact }) => {
     const activeDriver = drivers.find(d => d.id === currentDriverId);
-    
-    const centerPos: [number, number] = activeDriver 
-        ? [activeDriver.currentCoords.lat, activeDriver.currentCoords.lng]
-        : [ITAJAI_CENTER.lat, ITAJAI_CENTER.lng];
-
+    const centerPos: [number, number] = activeDriver ? [activeDriver.currentCoords.lat, activeDriver.currentCoords.lng] : [ITAJAI_CENTER.lat, ITAJAI_CENTER.lng];
     const getDriverColor = (index: number) => ['#2563eb', '#f97316', '#16a34a', '#dc2626', '#9333ea', '#db2777'][index % 6];
     
     const mapRef = useRef<L.Map>(null);
@@ -83,15 +67,7 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
         <div className="w-full h-full relative overflow-hidden bg-slate-200">
             <MapContainer ref={mapRef} center={ITAJAI_CENTER} zoom={13} className="w-full h-full" zoomControl={false} scrollWheelZoom={true}>
                 <MapController center={centerPos} zoom={15} driverId={currentDriverId} />
-                
-                {/* TILE LAYER OTIMIZADA: CARTO VOYAGER (Mais rápido que OSM) + BUFFER (Evita tela cinza) */}
-                <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                    keepBuffer={10} 
-                    updateWhenIdle={false}
-                    updateWhenZooming={false}
-                />
+                <TileLayer attribution='&copy; CARTO' url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" keepBuffer={10} updateWhenIdle={false} />
                 
                 {locations.map(loc => (
                     <Marker key={loc.id} position={[loc.coords.lat, loc.coords.lng]} icon={loc.type === 'HEADQUARTERS' ? hqIcon : L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize: [20, 32], iconAnchor: [10, 32] })}>
@@ -102,22 +78,16 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
                 {drivers.map((driver, index) => {
                     const isSelected = driver.id === currentDriverId;
                     const color = getDriverColor(index);
-                    
                     return (
                         <React.Fragment key={driver.id}>
                             <Marker position={[driver.currentCoords.lat, driver.currentCoords.lng]} icon={createDriverIcon(color, isSelected)} zIndexOffset={isSelected ? 1000 : 500}>
                                 <Popup><div className="font-bold">{driver.name}</div></Popup>
                             </Marker>
-                            
                             {driver.route.map((stop, stopIdx) => (
                                 <Marker key={`${driver.id}-stop-${stop.id}`} position={[stop.coords.lat, stop.coords.lng]} icon={createNumberedIcon(stopIdx + 1, isSelected && stopIdx === 0)} zIndexOffset={isSelected ? 2000 : 100} />
                             ))}
-
                             {driver.route.length > 0 && (
-                                <Polyline 
-                                    positions={[[driver.currentCoords.lat, driver.currentCoords.lng] as [number, number], ...driver.route.map(r => [r.coords.lat, r.coords.lng] as [number, number])]} 
-                                    pathOptions={{ color, weight: isSelected ? 6 : 4, opacity: isSelected ? 0.9 : 0.5, lineCap: 'round', lineJoin: 'round' }} 
-                                />
+                                <Polyline positions={[[driver.currentCoords.lat, driver.currentCoords.lng] as [number, number], ...driver.route.map(r => [r.coords.lat, r.coords.lng] as [number, number])]} pathOptions={{ color, weight: isSelected ? 6 : 4, opacity: isSelected ? 0.9 : 0.5, lineCap: 'round', lineJoin: 'round' }} />
                             )}
                         </React.Fragment>
                     );
