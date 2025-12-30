@@ -103,11 +103,11 @@ export const updateDriverLocationInDB = async (driverId: string, lat: number, ln
             lastSeen: Date.now()
         });
     } catch (e) {
-        // Falha silenciosa para não travar a UI do motorista
+        // Falha silenciosa para não travar a UI do motorista durante GPS
     }
 };
 
-// NOVA FUNÇÃO: Atualiza APENAS o status (usado pelo botão de Intervalo/Almoço)
+// Atualiza APENAS o status (usado pelo botão de Intervalo/Almoço)
 export const updateDriverStatusInDB = async (driverId: string, status: DriverStatus) => {
     if (!isConfigured) return;
     try {
@@ -145,13 +145,22 @@ export const deleteDriverFromDB = async (driverId: string) => {
     }
 };
 
+// CORREÇÃO CRÍTICA AQUI: Lança erro se falhar e sanitiza dados
 export const updateDriverRouteInDB = async (driverId: string, route: DeliveryLocation[]) => {
     if (!isConfigured) return;
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
-        await updateDoc(driverRef, { route, lastSeen: Date.now() });
+        
+        // Sanitização: Remove 'undefined' que o Firebase odeia
+        const cleanRoute = JSON.parse(JSON.stringify(route));
+        
+        await updateDoc(driverRef, { 
+            route: cleanRoute, 
+            lastSeen: Date.now() 
+        });
     } catch (e) {
-        console.error("Erro ao atualizar rota:", e);
+        console.error("Erro crítico ao salvar rota:", e);
+        throw e; // IMPORTANTE: Lança o erro para a UI mostrar
     }
 };
 
