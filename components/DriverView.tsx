@@ -24,27 +24,30 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const [isOptimizing, setIsOptimizing] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     
-    // Histórico Local da Sessão
+    // Histórico local
     const [completedRecords, setCompletedRecords] = useState<DeliveryRecord[]>([]);
     
-    // Modal e Estados de UI
+    // Modal
     const [showFinishModal, setShowFinishModal] = useState(false);
     const [finishStatus, setFinishStatus] = useState<'DELIVERED' | 'FAILED'>('DELIVERED');
     const [finishObs, setFinishObs] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false); // Previne duplo clique
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // --- LINK OFICIAL E SEGURO DO GOOGLE MAPS ---
     const openGoogleMapsRoute = () => {
         if (driverState.route.length === 0) return;
         
+        // Formato seguro de coordenadas
         const origin = `${driverState.currentCoords.lat},${driverState.currentCoords.lng}`;
         const lastStop = driverState.route[driverState.route.length - 1];
         const destination = `${lastStop.coords.lat},${lastStop.coords.lng}`;
         
+        // Waypoints com pipe (|)
         const waypoints = driverState.route.slice(0, -1)
             .map(loc => `${loc.coords.lat},${loc.coords.lng}`)
             .join('|');
             
-        // URL Universal (API 1) que funciona em todos os dispositivos
+        // URL da API v1 Oficial (Funciona em iOS, Android e Web)
         const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
         
         window.open(url, '_blank');
@@ -64,7 +67,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         setCompletedRecords([]); 
         
         try {
-            // Filtro por string para evitar erros de tipo
+            // Correção: Filtra usando string direta para evitar ReferenceError com Enums
             const selectedLocations = LOCATIONS_DB.filter(l => selectedIds.has(l.id));
             let orderedRoute = selectedLocations;
 
@@ -97,7 +100,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
     const handleConfirmDelivery = async () => {
         if (driverState.route.length === 0) return;
-        setIsSubmitting(true); // Bloqueia botão
+        setIsSubmitting(true);
 
         try {
             const currentLocation = driverState.route[0];
@@ -113,7 +116,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
             const updatedRecords = [...completedRecords, newRecord];
             setCompletedRecords(updatedRecords);
 
-            // Se for a última, salva no DB
             if (driverState.route.length === 1) {
                 const historyItem: RouteHistory = {
                     id: `route-${Date.now()}`,
@@ -131,10 +133,9 @@ export const DriverView: React.FC<DriverViewProps> = ({
             setShowFinishModal(false);
             completeDelivery();
         } catch (e) {
-            console.error(e);
-            alert("Erro ao salvar. Verifique sua conexão.");
+            alert("Erro ao salvar. Tente novamente.");
         } finally {
-            setIsSubmitting(false); // Libera botão
+            setIsSubmitting(false);
         }
     };
 
@@ -152,12 +153,10 @@ export const DriverView: React.FC<DriverViewProps> = ({
     if (driverState.route.length > 0) {
         return (
             <div className="flex flex-col h-full w-full bg-white relative">
-                
                 {showFinishModal && (
                     <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-in fade-in">
                         <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4">
                             <h3 className="font-bold text-lg text-slate-900 border-b pb-2">Finalizar Entrega</h3>
-                            
                             <div className="flex gap-2">
                                 <button onClick={() => setFinishStatus('DELIVERED')} className={`flex-1 py-3 rounded-xl font-bold text-sm border-2 transition-all flex flex-col items-center gap-1 ${finishStatus === 'DELIVERED' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 text-slate-400'}`}>
                                     <CheckSquare className="w-6 h-6" /> Entregue
@@ -166,12 +165,10 @@ export const DriverView: React.FC<DriverViewProps> = ({
                                     <XCircle className="w-6 h-6" /> Não Entregue
                                 </button>
                             </div>
-
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase ml-1">Observação</label>
-                                <textarea value={finishObs} onChange={(e) => setFinishObs(e.target.value)} placeholder={finishStatus === 'DELIVERED' ? "Quem recebeu?" : "Motivo da falha?"} className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 h-20 resize-none mt-1" />
+                                <textarea value={finishObs} onChange={(e) => setFinishObs(e.target.value)} placeholder={finishStatus === 'DELIVERED' ? "Quem recebeu?" : "Motivo da falha?"} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 h-20 resize-none mt-1" />
                             </div>
-
                             <div className="flex gap-2 pt-2">
                                 <button onClick={() => setShowFinishModal(false)} disabled={isSubmitting} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl">Cancelar</button>
                                 <button onClick={handleConfirmDelivery} disabled={isSubmitting} className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-xl shadow-lg flex justify-center items-center">
@@ -198,7 +195,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20 md:pb-4">
                     <div className={`rounded-2xl p-5 shadow-xl relative overflow-hidden transition-all duration-500 ${isBreak ? 'bg-amber-500 text-white' : 'bg-slate-900 text-white'}`}>
                         <div className="absolute top-0 right-0 p-4 opacity-10">{isBreak ? <Coffee className="w-20 h-20" /> : <Truck className="w-20 h-20" />}</div>
-                        
                         {isBreak ? (
                             <div className="text-center py-4">
                                 <h3 className="text-2xl font-black uppercase tracking-widest mb-1">EM INTERVALO</h3>
@@ -209,13 +205,11 @@ export const DriverView: React.FC<DriverViewProps> = ({
                                 <h3 className="text-[10px] font-bold text-emerald-400 uppercase tracking-[0.2em] mb-2">Próxima Parada #1</h3>
                                 <p className="text-xl font-black mb-1 leading-tight">{currentTarget.name}</p>
                                 <p className="text-xs text-slate-400 mb-6 truncate">{currentTarget.address}</p>
-                                
                                 <button onClick={openGoogleMapsRoute} className="w-full mb-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
                                     <Navigation className="w-4 h-4" /> Navegar com Google Maps
                                 </button>
                             </>
                         )}
-                        
                         <div className="grid grid-cols-2 gap-3 relative z-10">
                             <button onClick={toggleStatus} className={`py-4 rounded-xl font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95 ${isBreak ? 'bg-white text-amber-600 hover:bg-amber-50' : 'bg-amber-500 text-white hover:bg-amber-400'}`}>
                                 {isBreak ? <><PlayCircle className="w-4 h-4" /> Retornar</> : <><Coffee className="w-4 h-4" /> Intervalo</>}
@@ -246,7 +240,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
         );
     }
 
-    // Tela de Seleção (Sem alterações lógicas, apenas mantendo consistência)
     return (
         <div className="flex flex-col h-full w-full bg-white">
             <div className="flex-none p-5 bg-slate-900 text-white shadow-md flex justify-between items-center">
@@ -271,6 +264,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     <p className="text-xs text-slate-500 mb-6">Selecione os destinos. A IA otimizará a sequência.</p>
                     
                     <div className="grid grid-cols-1 gap-2">
+                        {/* Correção: Uso de string 'HEADQUARTERS' em vez de Enum */}
                         {LOCATIONS_DB.filter(l => l.type !== 'HEADQUARTERS').map(loc => (
                             <div key={loc.id} onClick={() => toggleSelection(loc.id)} className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center justify-between transition-all active:scale-[0.98] ${selectedIds.has(loc.id) ? 'bg-emerald-50 border-emerald-500' : 'bg-white border-slate-100 hover:border-slate-300'}`}>
                                 <div className="overflow-hidden pr-4">
