@@ -64,16 +64,12 @@ export const getDriverById = async (driverId: string): Promise<DriverState | nul
     }
 };
 
-// --- NOVA FUNÇÃO: VERIFICAR DUPLICIDADE ---
 export const findDriverByName = async (name: string): Promise<DriverState | null> => {
     if (!isConfigured) return null;
     try {
-        // Busca motorista pelo nome exato
         const q = query(collection(db, DRIVERS_COLLECTION), where("name", "==", name));
         const querySnapshot = await getDocs(q);
-        
         if (!querySnapshot.empty) {
-            // Retorna o primeiro encontrado
             return querySnapshot.docs[0].data() as DriverState;
         }
         return null;
@@ -135,7 +131,6 @@ export const registerDriverInDB = async (driver: DriverState) => {
     if (!isConfigured) return;
     try {
         const data = sanitizeForFirestore({ ...driver, lastSeen: Date.now() });
-        // Usa setDoc com merge: Se já existir o ID, atualiza. Se não, cria.
         await setDoc(doc(db, DRIVERS_COLLECTION, driver.id), data, { merge: true });
     } catch (e) { console.error("Erro registro:", e); }
 };
@@ -161,25 +156,43 @@ export const updateDriverRouteInDB = async (driverId: string, route: DeliveryLoc
 export const saveRouteToHistoryDB = async (historyItem: RouteHistory) => {
     if (!isConfigured) return;
     try {
-        // ID único baseado no driver e timestamp para evitar sobreposição
         const docId = `history-${historyItem.driverName}-${Date.now()}`;
         const docRef = doc(db, HISTORY_COLLECTION, docId);
-        await setDoc(docRef, sanitizeForFirestore(historyItem));
+        await setDoc(docRef, sanitizeForFirestore({ ...historyItem, id: docId }));
     } catch (e) { console.error("Erro ao salvar histórico:", e); }
+};
+
+// NOVA FUNÇÃO: Excluir Relatório
+export const deleteRouteHistoryFromDB = async (historyId: string) => {
+    if (!isConfigured) return;
+    try {
+        await deleteDoc(doc(db, HISTORY_COLLECTION, historyId));
+    } catch (e) {
+        console.error("Erro ao excluir histórico:", e);
+        throw e;
+    }
 };
 
 export const subscribeToHistory = (callback: (history: RouteHistory[]) => void) => {
     if (!isConfigured) return () => {};
     try {
-        // Limita aos últimos 50 para performance
-        const q = query(collection(db, HISTORY_COLLECTION), limit(50)); 
+        // Aumentei o limite para 100 para ter mais histórico visível
+        const q = query(collection(db, HISTORY_COLLECTION), limit(100)); 
         return onSnapshot(q, (snapshot) => {
             const history: RouteHistory[] = [];
             snapshot.forEach((doc) => {
-                history.push(doc.data() as RouteHistory);
+                // Garante que o ID do documento venha no objeto
+                const data = doc.data() as RouteHistory;
+                history.push({ ...data, id: doc.id });
             });
-            // Ordena pela data (mais recente primeiro)
-            history.sort((a, b) => b.date.localeCompare(a.date));
+            history.sort((a, b) => {
+                // Ordenação mais robusta por timestamp reverso (mais novo primeiro)
+                const dateA = new Date(a.date).getTime();
+                const dateB = new Date(b.date).getTime();
+                // Se as datas forem iguais (mesmo dia), usa o ID (que tem timestamp) para desempatar
+                if (dateA === dateB) return b.id.localeCompare(a.id);
+                return dateB - dateA;
+            });
             callback(history);
         });
     } catch (e) { return () => {}; }
