@@ -135,6 +135,7 @@ export const subscribeToHistory = (callback: (history: RouteHistory[]) => void) 
             });
             callback(history);
         }, () => {
+            // Fallback de ordenação manual se faltar índice
             const qSimple = query(collection(db, HISTORY_COLLECTION), limit(100));
             onSnapshot(qSimple, (snap) => {
                 const h: RouteHistory[] = [];
