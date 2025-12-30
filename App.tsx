@@ -16,7 +16,7 @@ import {
     seedDatabaseIfEmpty,
     updateLocationStatusInDB,
     getDriverById,
-    findDriverByName // Função para checar duplicidade
+    findDriverByName // Essencial para evitar duplicidade
 } from './services/dbService';
 
 const DriverView = lazy(() => import('./components/DriverView').then(m => ({ default: m.DriverView })));
@@ -42,6 +42,8 @@ const App: React.FC = () => {
   
   const [drivers, setDrivers] = useState<DriverState[]>([]);
   const [locations, setLocations] = useState<DeliveryLocation[]>([]);
+  
+  // Refs para performance do GPS
   const driversRef = useRef<DriverState[]>([]); 
   const lastPositionRef = useRef<{lat: number; lng: number} | null>(null);
   const lastUpdateTimeRef = useRef<number>(0);
@@ -59,7 +61,7 @@ const App: React.FC = () => {
 
   useEffect(() => { driversRef.current = drivers; }, [drivers]);
 
-  // INICIALIZAÇÃO E AUTO-LOGIN
+  // INICIALIZAÇÃO
   useEffect(() => {
     seedDatabaseIfEmpty();
 
@@ -74,14 +76,11 @@ const App: React.FC = () => {
 
         if (savedDriverId && savedView === AppView.DRIVER) {
             setIsLoginLoading(true);
-            // Verifica se o motorista ainda existe no banco
             const existingDriver = await getDriverById(savedDriverId);
-            
             if (existingDriver) {
                 setCurrentUserDriverId(savedDriverId);
                 setCurrentView(AppView.DRIVER);
             } else {
-                // Se não existe mais (foi deletado), limpa a sessão
                 localStorage.removeItem(STORAGE_KEY_DRIVER);
                 localStorage.removeItem(STORAGE_KEY_VIEW);
             }
@@ -104,7 +103,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // LOGIN COM VERIFICAÇÃO DE DUPLICIDADE
+  // LOGIN INTELIGENTE
   const handleDriverLogin = async () => {
     const trimmedName = inputDriverName.trim();
     if (!trimmedName) return alert("Digite seu nome.");
@@ -112,29 +111,20 @@ const App: React.FC = () => {
     setIsLoginLoading(true);
 
     try {
-        // 1. Verifica se já existe motorista com esse nome
         const existingDriver = await findDriverByName(trimmedName);
-        
         let driverId = '';
         let driverData: DriverState;
 
         if (existingDriver) {
-            // Se já existe, pergunta se quer reassumir a conta
             if (confirm(`Já existe um cadastro para "${trimmedName}". É você? Clique em OK para entrar.`)) {
                 driverId = existingDriver.id;
-                driverData = {
-                    ...existingDriver,
-                    lastSeen: Date.now(),
-                    status: 'IDLE' // Reseta status para segurança
-                };
+                driverData = { ...existingDriver, lastSeen: Date.now(), status: 'IDLE' };
             } else {
-                // Se não é a pessoa, cancela para não duplicar nomes
                 alert("Por favor, use um nome diferente (ex: João Silva 2) para evitar confusão.");
                 setIsLoginLoading(false);
                 return; 
             }
         } else {
-            // Cria NOVO motorista
             driverId = `driver-${Date.now()}`;
             driverData = {
                 id: driverId,
@@ -147,19 +137,14 @@ const App: React.FC = () => {
             };
         }
 
-        // Salva/Atualiza no Banco
         await registerDriverInDB(driverData);
-        
-        // Salva Localmente (Persistência)
         localStorage.setItem(STORAGE_KEY_DRIVER, driverId);
         localStorage.setItem(STORAGE_KEY_VIEW, AppView.DRIVER);
-
         setCurrentUserDriverId(driverId);
         setCurrentView(AppView.DRIVER);
         requestLocation();
 
     } catch (error) {
-        console.error(error);
         alert("Erro no login. Tente novamente.");
     } finally {
         setIsLoginLoading(false);
@@ -185,7 +170,7 @@ const App: React.FC = () => {
       setCurrentView(AppView.LOGIN);
   };
 
-  // GPS
+  // GPS OTIMIZADO
   useEffect(() => {
     let watchId: number;
     const shouldTrack = () => {
@@ -306,11 +291,10 @@ const App: React.FC = () => {
         
         <div className="bg-white/95 backdrop-blur-xl border border-white/20 rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center z-10 relative">
           <div className="flex justify-center mb-8"><H2Logo className="h-20" variant="dark" /></div>
-          
           {isLoginLoading ? (
             <div className="py-10 flex flex-col items-center">
                 <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mb-3" />
-                <p className="text-sm font-bold text-slate-500">Buscando cadastro...</p>
+                <p className="text-sm font-bold text-slate-500">Buscando usuário...</p>
             </div>
           ) : (
             <div className="space-y-4">
