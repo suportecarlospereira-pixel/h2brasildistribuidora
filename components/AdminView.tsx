@@ -1,7 +1,7 @@
 // NOME DO ARQUIVO: components/AdminView.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { DriverState, DeliveryLocation, LocationType, RouteHistory } from '../types';
-import { Users, Send, History, Calendar, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, Coffee, MapPin, ChevronDown, ChevronUp, AlertCircle, CheckSquare } from 'lucide-react';
+import { Users, Send, History, Calendar, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, Coffee, MapPin, ChevronDown, ChevronUp, AlertCircle, CheckSquare, X } from 'lucide-react';
 import { getSmartAssistantResponse } from '../services/geminiService';
 import { deleteDriverFromDB, subscribeToHistory, deleteRouteHistoryFromDB } from '../services/dbService';
 import { H2Logo } from './Logo';
@@ -20,9 +20,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     const [isLoading, setIsLoading] = useState(false);
     
     // Estados de exclusão
-    const [deletingId, setDeletingId] = useState<string | null>(null); // Para motoristas
-    const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null); // Para histórico
+    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
     
+    // Filtro de data (Padrão: Hoje)
     const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const [historyData, setHistoryData] = useState<RouteHistory[]>([]);
     const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
@@ -61,12 +62,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         }
     };
 
-    // NOVA FUNÇÃO: Excluir item do histórico
     const handleDeleteHistory = async (e: React.MouseEvent, historyId: string, driverName: string) => {
-        e.stopPropagation(); // Impede que o clique expanda o item
+        e.stopPropagation();
         if (deletingHistoryId) return;
         
-        if (window.confirm(`Excluir relatório de rota de "${driverName}"? Esta ação não pode ser desfeita.`)) {
+        if (window.confirm(`Excluir relatório de rota de "${driverName}"?`)) {
             setDeletingHistoryId(historyId);
             try {
                 await deleteRouteHistoryFromDB(historyId);
@@ -121,8 +121,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         }
     }, [assistantResponse]);
 
-    const filteredHistory = historyData.filter(h => h.date === selectedDate);
-    const pendingLocations = allLocations.filter(l => l.type !== 'HEADQUARTERS'); // Correção de tipo
+    // Lógica de Filtro: Se tiver data, filtra por ela. Senão, mostra tudo.
+    const filteredHistory = selectedDate 
+        ? historyData.filter(h => h.date === selectedDate) 
+        : historyData;
+        
+    const pendingLocations = allLocations.filter(l => l.type !== 'HEADQUARTERS');
 
     return (
         <div className="flex flex-col h-full w-full bg-slate-50">
@@ -168,7 +172,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                             </div>
                         ) : (
                             allDrivers.map((driver) => (
-                                <div key={driver.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 hover:border-emerald-200 transition-colors group relative">
+                                <div key={driver.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 relative">
                                     <div className="flex items-center justify-between mb-3">
                                         <div className="flex items-center gap-3">
                                             <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black shadow-sm bg-blue-600">
@@ -259,9 +263,20 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                     <div className="p-4 space-y-4">
                         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
                             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Relatório Diário</h3>
-                            <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100 focus-within:ring-2 focus-within:ring-emerald-500 transition-all">
-                                <Calendar className="w-5 h-5 text-emerald-600" />
-                                <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="bg-transparent w-full text-slate-900 focus:outline-none font-black text-sm uppercase" />
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100 focus-within:ring-2 focus-within:ring-emerald-500 transition-all">
+                                    <Calendar className="w-5 h-5 text-emerald-600" />
+                                    <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="bg-transparent w-full text-slate-900 focus:outline-none font-black text-sm uppercase" />
+                                </div>
+                                {selectedDate && (
+                                    <button 
+                                        onClick={() => setSelectedDate('')} 
+                                        className="bg-slate-100 hover:bg-slate-200 text-slate-500 p-4 rounded-2xl transition-colors"
+                                        title="Limpar filtro de data (Ver tudo)"
+                                    >
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                )}
                             </div>
                         </div>
 
@@ -290,11 +305,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                                                     {record.totalFailures} Falhas
                                                                 </span>
                                                             )}
+                                                            <span className="text-[9px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                                                                {new Date(record.date).toLocaleDateString()}
+                                                            </span>
                                                         </div>
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2">
-                                                    {/* BOTÃO EXCLUIR HISTÓRICO */}
                                                     <button 
                                                         onClick={(e) => handleDeleteHistory(e, record.id, record.driverName)}
                                                         className="p-2 bg-slate-50 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors"
@@ -336,7 +353,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                             ) : (
                                 <div className="flex flex-col items-center justify-center py-20 text-slate-400 bg-white rounded-3xl border border-dashed border-slate-200">
                                     <History className="w-12 h-12 mb-4 opacity-10" />
-                                    <p className="text-xs font-black uppercase tracking-widest opacity-40">Sem registros nesta data</p>
+                                    <p className="text-xs font-black uppercase tracking-widest opacity-40">
+                                        {selectedDate ? "Sem registros nesta data" : "Nenhum histórico encontrado"}
+                                    </p>
                                 </div>
                             )}
                         </div>
