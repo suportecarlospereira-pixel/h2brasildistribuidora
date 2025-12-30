@@ -1,5 +1,4 @@
 // NOME DO ARQUIVO: types.ts
-
 export enum LocationType {
   UBS = 'UBS',
   CRAS = 'CRAS',
@@ -16,13 +15,12 @@ export interface Coordinates {
   lng: number;
 }
 
-// NOVA INTERFACE: Registro detalhado de cada parada
 export interface DeliveryRecord {
   locationId: string;
   locationName: string;
   timestamp: string;
-  status: 'DELIVERED' | 'FAILED'; // Sucesso ou Falha
-  observation?: string; // "Recebido por João" ou "Local fechado"
+  status: 'DELIVERED' | 'FAILED';
+  observation?: string;
 }
 
 export interface DeliveryLocation {
@@ -51,8 +49,8 @@ export interface RouteHistory {
   date: string;
   driverName: string;
   totalDeliveries: number;
-  totalFailures: number; // Novo contador de falhas
-  records: DeliveryRecord[]; // Lista detalhada com obs
+  totalFailures: number;
+  records: DeliveryRecord[];
   status: 'COMPLETED' | 'PARTIAL';
 }
 
