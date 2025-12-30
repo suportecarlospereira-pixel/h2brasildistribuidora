@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { DriverState, DeliveryLocation, LocationType, RouteHistory } from '../types';
 import { Users, Send, History, Calendar, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, Coffee, MapPin, ChevronDown, ChevronUp, AlertCircle, CheckSquare } from 'lucide-react';
 import { getSmartAssistantResponse } from '../services/geminiService';
-import { deleteDriverFromDB, subscribeToHistory } from '../services/dbService';
+import { deleteDriverFromDB, subscribeToHistory, deleteRouteHistoryFromDB } from '../services/dbService';
 import { H2Logo } from './Logo';
 
 interface AdminViewProps {
@@ -18,7 +18,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     const [assistantQuery, setAssistantQuery] = useState('');
     const [assistantResponse, setAssistantResponse] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [deletingId, setDeletingId] = useState<string | null>(null);
+    
+    // Estados de exclusão
+    const [deletingId, setDeletingId] = useState<string | null>(null); // Para motoristas
+    const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null); // Para histórico
+    
     const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const [historyData, setHistoryData] = useState<RouteHistory[]>([]);
     const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
@@ -50,10 +54,26 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
             try {
                 await deleteDriverFromDB(id);
             } catch (e) {
-                console.error("Erro ao deletar:", e);
-                alert("Erro ao excluir. Verifique permissões.");
+                alert("Erro ao excluir motorista.");
             } finally {
                 setDeletingId(null);
+            }
+        }
+    };
+
+    // NOVA FUNÇÃO: Excluir item do histórico
+    const handleDeleteHistory = async (e: React.MouseEvent, historyId: string, driverName: string) => {
+        e.stopPropagation(); // Impede que o clique expanda o item
+        if (deletingHistoryId) return;
+        
+        if (window.confirm(`Excluir relatório de rota de "${driverName}"? Esta ação não pode ser desfeita.`)) {
+            setDeletingHistoryId(historyId);
+            try {
+                await deleteRouteHistoryFromDB(historyId);
+            } catch (error) {
+                alert("Erro ao excluir relatório.");
+            } finally {
+                setDeletingHistoryId(null);
             }
         }
     };
@@ -102,7 +122,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     }, [assistantResponse]);
 
     const filteredHistory = historyData.filter(h => h.date === selectedDate);
-    const pendingLocations = allLocations.filter(l => l.type !== LocationType.HEADQUARTERS);
+    const pendingLocations = allLocations.filter(l => l.type !== 'HEADQUARTERS'); // Correção de tipo
 
     return (
         <div className="flex flex-col h-full w-full bg-slate-50">
@@ -133,6 +153,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
             </div>
 
             <div className="flex-1 overflow-y-auto pb-20 md:pb-4 no-scrollbar">
+                
                 {activeTab === 'LIVE' && (
                     <div className="p-4 space-y-4">
                         <div className="flex items-center justify-between px-1">
@@ -183,24 +204,33 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                 </div>
                             ))
                         )}
+                        
+                        <div className="bg-emerald-900 rounded-3xl p-5 text-white shadow-xl shadow-emerald-900/20 relative overflow-hidden">
+                            <div className="absolute -right-4 -top-4 opacity-10"><BrainCircuit className="w-32 h-32" /></div>
+                            <h3 className="font-black text-xs uppercase tracking-widest mb-4 flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" /> Inteligência H2</h3>
+                            
+                            {assistantResponse && (
+                                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 mb-4 border border-white/10 animate-in zoom-in-95">
+                                    <p className="text-sm leading-relaxed">{assistantResponse}</p>
+                                </div>
+                            )}
+
+                            <div className="flex gap-2">
+                                <input type="text" value={assistantQuery} onChange={(e) => setAssistantQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAskAssistant()} placeholder="Perguntar ao sistema..." className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:bg-white focus:text-slate-900 transition-all placeholder:text-white/40" />
+                                <button onClick={handleAskAssistant} disabled={isLoading} className="bg-emerald-500 text-white w-12 rounded-2xl hover:bg-emerald-400 transition-all flex items-center justify-center disabled:opacity-50 active:scale-95 shadow-lg">
+                                    {isLoading ? <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> : <Send className="w-4 h-4" />}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
 
-                {/* ABA DISPATCH OMITIDA PARA BREVIDADE (CÓDIGO IGUAL AO ANTERIOR) */}
                 {activeTab === 'DISPATCH' && (
                      <div className="p-4 space-y-4">
                         <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl">
-                            <h3 className="font-black text-sm uppercase tracking-widest mb-1 flex items-center gap-2">
-                                <Users className="w-4 h-4 text-emerald-400" />
-                                Central de Frotas
-                            </h3>
+                            <h3 className="font-black text-sm uppercase tracking-widest mb-1 flex items-center gap-2"><Users className="w-4 h-4 text-emerald-400" /> Central de Frotas</h3>
                             <p className="text-slate-400 text-xs mb-6">Selecione pontos pendentes para roteirização automática por IA.</p>
-                            
-                            <button 
-                                onClick={handleDistribute}
-                                disabled={selectedForDispatch.size === 0 || isDistributing}
-                                className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 flex items-center justify-center gap-3 transition-all active:scale-95"
-                            >
+                            <button onClick={handleDistribute} disabled={selectedForDispatch.size === 0 || isDistributing} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 flex items-center justify-center gap-3 transition-all active:scale-95">
                                 {isDistributing ? <><Loader2 className="w-4 h-4 animate-spin" /> Processando...</> : `Distribuir ${selectedForDispatch.size} Pontos`}
                             </button>
                         </div>
@@ -212,20 +242,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                              </div>
                              <div className="max-h-[50vh] overflow-y-auto">
                                  {pendingLocations.map(loc => (
-                                     <div 
-                                        key={loc.id}
-                                        onClick={() => toggleDispatchSelection(loc.id)}
-                                        className={`p-4 border-b border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors ${selectedForDispatch.has(loc.id) ? 'bg-emerald-50/50' : ''}`}
-                                     >
+                                     <div key={loc.id} onClick={() => toggleDispatchSelection(loc.id)} className={`p-4 border-b border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors ${selectedForDispatch.has(loc.id) ? 'bg-emerald-50/50' : ''}`}>
                                          <div className="pr-4 min-w-0">
                                              <p className="font-bold text-sm text-slate-800 truncate">{loc.name}</p>
                                              <p className="text-[10px] text-slate-400 truncate uppercase mt-0.5">{loc.address}</p>
                                          </div>
-                                         {selectedForDispatch.has(loc.id) ? (
-                                             <CheckCircle className="w-6 h-6 text-emerald-600 shrink-0 fill-emerald-100" />
-                                         ) : (
-                                             <Circle className="w-6 h-6 text-slate-200 shrink-0" />
-                                         )}
+                                         {selectedForDispatch.has(loc.id) ? <CheckCircle className="w-6 h-6 text-emerald-600 shrink-0 fill-emerald-100" /> : <Circle className="w-6 h-6 text-slate-200 shrink-0" />}
                                      </div>
                                  ))}
                              </div>
@@ -236,7 +258,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                 {activeTab === 'HISTORY' && (
                     <div className="p-4 space-y-4">
                         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-                            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Arquivo de Entregas</h3>
+                            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Relatório Diário</h3>
                             <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100 focus-within:ring-2 focus-within:ring-emerald-500 transition-all">
                                 <Calendar className="w-5 h-5 text-emerald-600" />
                                 <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="bg-transparent w-full text-slate-900 focus:outline-none font-black text-sm uppercase" />
@@ -248,7 +270,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                 filteredHistory.map(record => {
                                     const isExpanded = expandedHistoryId === record.id;
                                     return (
-                                        <div key={record.id} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                                        <div key={record.id} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden relative group">
                                             <div 
                                                 className="p-5 flex justify-between items-start cursor-pointer hover:bg-slate-50 transition-colors"
                                                 onClick={() => setExpandedHistoryId(isExpanded ? null : record.id)}
@@ -271,7 +293,17 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                                         </div>
                                                     </div>
                                                 </div>
-                                                {isExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                                                <div className="flex items-center gap-2">
+                                                    {/* BOTÃO EXCLUIR HISTÓRICO */}
+                                                    <button 
+                                                        onClick={(e) => handleDeleteHistory(e, record.id, record.driverName)}
+                                                        className="p-2 bg-slate-50 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors"
+                                                        title="Excluir Relatório"
+                                                    >
+                                                        {deletingHistoryId === record.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                                    </button>
+                                                    {isExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                                                </div>
                                             </div>
                                             
                                             {isExpanded && (
