@@ -17,11 +17,16 @@ import { LOCATIONS_DB, MOCK_DRIVERS_LIST } from '../constants';
 
 const DRIVERS_COLLECTION = 'drivers';
 const LOCATIONS_COLLECTION = 'locations';
+const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; // 5 Dias
 
-// Configuração: Motoristas inativos há mais de 5 dias somem do mapa
-const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; 
+// HELPER: Remove 'undefined' recursivamente para o Firebase não travar
+const sanitizeForFirestore = (obj: any): any => {
+    return JSON.parse(JSON.stringify(obj, (key, value) => {
+        return value === undefined ? null : value;
+    }));
+};
 
-// --- INITIALIZATION ---
+// --- INICIALIZAÇÃO ---
 export const seedDatabaseIfEmpty = async () => {
     if (!isConfigured) return;
     try {
@@ -30,18 +35,16 @@ export const seedDatabaseIfEmpty = async () => {
             const batch = writeBatch(db);
             LOCATIONS_DB.forEach(loc => {
                 const docRef = doc(db, LOCATIONS_COLLECTION, loc.id);
-                batch.set(docRef, loc);
+                batch.set(docRef, sanitizeForFirestore(loc));
             });
             await batch.commit();
         }
     } catch (e) {
-        console.warn("Modo Offline: DB não semeado (verifique conexão).");
+        console.warn("Offline: Banco de dados não semeado.");
     }
 };
 
-// --- DRIVERS ---
-
-// Busca um motorista específico (útil para login/restore session)
+// --- MOTORISTAS ---
 export const getDriverById = async (driverId: string): Promise<DriverState | null> => {
     if (!isConfigured) return null;
     try {
@@ -52,18 +55,15 @@ export const getDriverById = async (driverId: string): Promise<DriverState | nul
         }
         return null;
     } catch (e) {
-        console.error("Erro ao buscar motorista:", e);
         return null;
     }
 };
 
-// Escuta atualizações em tempo real de todos os motoristas
 export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) => {
     if (!isConfigured) {
         callback(MOCK_DRIVERS_LIST);
         return () => {};
     }
-
     try {
         const q = query(collection(db, DRIVERS_COLLECTION));
         return onSnapshot(q, 
@@ -72,7 +72,7 @@ export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) =
                 const drivers: DriverState[] = [];
                 snapshot.forEach((doc) => {
                     const data = doc.data() as DriverState;
-                    // FILTRO: Só adiciona se visto nos últimos 5 dias
+                    // Filtro de Inatividade (5 dias)
                     if (!data.lastSeen || (now - data.lastSeen < INACTIVITY_THRESHOLD)) {
                         drivers.push(data);
                     }
@@ -80,79 +80,69 @@ export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) =
                 callback(drivers);
             },
             (error) => {
-                console.error("Monitor H2: Erro na subscrição:", error);
+                console.error("Erro no stream de motoristas:", error);
                 callback(MOCK_DRIVERS_LIST);
             }
         );
     } catch (e) {
-        console.error("Erro crítico no Firestore:", e);
         callback(MOCK_DRIVERS_LIST);
         return () => {};
     }
 };
 
-// Atualiza posição E status (usado pelo GPS automático)
+// Atualização de GPS (Frequente)
 export const updateDriverLocationInDB = async (driverId: string, lat: number, lng: number, address: string, status: DriverStatus = 'MOVING') => {
     if (!isConfigured) return;
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
         await updateDoc(driverRef, {
             currentCoords: { lat, lng },
-            currentAddress: address,
-            status: status, // Atualiza se está MOVING ou IDLE
+            currentAddress: address || "Endereço desconhecido",
+            status: status,
             lastSeen: Date.now()
         });
     } catch (e) {
-        // Falha silenciosa para não travar a UI do motorista durante GPS
+        // Silêncio em erros de GPS para não bloquear a UI
     }
 };
 
-// Atualiza APENAS o status (usado pelo botão de Intervalo/Almoço)
+// Atualização de Status (Pausa/Almoço)
 export const updateDriverStatusInDB = async (driverId: string, status: DriverStatus) => {
     if (!isConfigured) return;
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
-        await updateDoc(driverRef, { 
-            status: status,
-            lastSeen: Date.now() 
-        });
+        await updateDoc(driverRef, { status, lastSeen: Date.now() });
     } catch (e) {
-        console.error("Erro ao atualizar status:", e);
+        console.error("Erro ao mudar status:", e);
     }
 };
 
 export const registerDriverInDB = async (driver: DriverState) => {
     if (!isConfigured) return;
     try {
-        const driverWithTimestamp = {
-            ...driver,
-            lastSeen: Date.now()
-        };
-        await setDoc(doc(db, DRIVERS_COLLECTION, driver.id), driverWithTimestamp, { merge: true });
+        const data = sanitizeForFirestore({ ...driver, lastSeen: Date.now() });
+        await setDoc(doc(db, DRIVERS_COLLECTION, driver.id), data, { merge: true });
     } catch (e) {
-        console.error("Erro ao registrar motorista:", e);
+        console.error("Erro ao registrar:", e);
     }
 };
 
 export const deleteDriverFromDB = async (driverId: string) => {
     if (!isConfigured) return;
     try {
-        const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
-        await deleteDoc(driverRef);
+        await deleteDoc(doc(db, DRIVERS_COLLECTION, driverId));
     } catch (e) {
-        console.error("Erro ao excluir motorista:", e);
         throw e;
     }
 };
 
-// CORREÇÃO CRÍTICA AQUI: Lança erro se falhar e sanitiza dados
+// ROTA (Crítico: Sanitização aplicada aqui)
 export const updateDriverRouteInDB = async (driverId: string, route: DeliveryLocation[]) => {
     if (!isConfigured) return;
     try {
         const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
-        
-        // Sanitização: Remove 'undefined' que o Firebase odeia
-        const cleanRoute = JSON.parse(JSON.stringify(route));
+        // Garante que o objeto está limpo para o Firebase
+        const cleanRoute = sanitizeForFirestore(route);
         
         await updateDoc(driverRef, { 
             route: cleanRoute, 
@@ -160,37 +150,27 @@ export const updateDriverRouteInDB = async (driverId: string, route: DeliveryLoc
         });
     } catch (e) {
         console.error("Erro crítico ao salvar rota:", e);
-        throw e; // IMPORTANTE: Lança o erro para a UI mostrar
+        throw e; // Lança para o UI tratar
     }
 };
 
-// --- LOCATIONS ---
+// --- LOCAIS ---
 export const subscribeToLocations = (callback: (locations: DeliveryLocation[]) => void) => {
     if (!isConfigured) {
         callback(LOCATIONS_DB);
         return () => {};
     }
-    try {
-        const q = query(collection(db, LOCATIONS_COLLECTION));
-        return onSnapshot(q, (snapshot) => {
-            const locations: DeliveryLocation[] = [];
-            snapshot.forEach((doc) => {
-                locations.push(doc.data() as DeliveryLocation);
-            });
-            callback(locations.length > 0 ? locations : LOCATIONS_DB);
-        }, () => callback(LOCATIONS_DB));
-    } catch (e) {
-        callback(LOCATIONS_DB);
-        return () => {};
-    }
+    const q = query(collection(db, LOCATIONS_COLLECTION));
+    return onSnapshot(q, (snapshot) => {
+        const locations: DeliveryLocation[] = [];
+        snapshot.forEach((doc) => locations.push(doc.data() as DeliveryLocation));
+        callback(locations.length ? locations : LOCATIONS_DB);
+    }, () => callback(LOCATIONS_DB));
 };
 
 export const updateLocationStatusInDB = async (locationId: string, status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED') => {
     if (!isConfigured) return;
     try {
-        const locRef = doc(db, LOCATIONS_COLLECTION, locationId);
-        await updateDoc(locRef, { status });
-    } catch (e) {
-        console.error("Erro ao atualizar status da entrega:", e);
-    }
+        await updateDoc(doc(db, LOCATIONS_COLLECTION, locationId), { status });
+    } catch (e) { console.error(e); }
 };
