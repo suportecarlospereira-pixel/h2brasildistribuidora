@@ -3,8 +3,8 @@ import React, { useState } from 'react';
 import { DeliveryLocation, DriverState, LocationType, RouteHistory } from '../types';
 import { LOCATIONS_DB } from '../constants';
 import { optimizeRouteOrder, getRouteBriefingAudio } from '../services/geminiService';
-import { saveRouteToHistoryDB } from '../services/dbService'; // Importação nova
-import { Truck, Navigation, CheckCircle, Circle, MapPin, Loader2, Volume2, ShieldAlert, Coffee, PlayCircle, ExternalLink, Map as MapIcon } from 'lucide-react';
+import { saveRouteToHistoryDB } from '../services/dbService';
+import { Truck, Navigation, CheckCircle, Circle, MapPin, Loader2, Volume2, ShieldAlert, Coffee, PlayCircle, Map as MapIcon } from 'lucide-react';
 import { H2Logo } from './Logo';
 
 interface DriverViewProps {
@@ -23,26 +23,17 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isOptimizing, setIsOptimizing] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    
+    // --- ESTADO PARA ACUMULAR ENTREGAS REALIZADAS ---
+    const [completedLocations, setCompletedLocations] = useState<string[]>([]);
 
-    // --- FUNÇÃO PARA GERAR LINK DO GOOGLE MAPS ---
     const openGoogleMapsRoute = () => {
         if (driverState.route.length === 0) return;
-        
-        // Origem: Onde o motorista está agora
         const origin = `${driverState.currentCoords.lat},${driverState.currentCoords.lng}`;
-        
-        // Destino: A última parada da rota
         const lastStop = driverState.route[driverState.route.length - 1];
         const destination = `${lastStop.coords.lat},${lastStop.coords.lng}`;
-        
-        // Waypoints: Todas as paradas intermediárias (entre o motorista e o final)
-        // O Google Maps aceita coordenadas separadas por '|'
         const waypoints = driverState.route.slice(0, -1).map(loc => `${loc.coords.lat},${loc.coords.lng}`).join('|');
-        
-        // Monta a URL Universal
         const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
-        
-        // Abre em nova aba (no celular, abre o App direto)
         window.open(url, '_blank');
     };
 
@@ -57,6 +48,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
         if (selectedIds.size === 0) return;
         setIsOptimizing(true);
         setErrorMsg(null);
+        // Reseta o histórico local ao iniciar nova rota
+        setCompletedLocations([]); 
         
         try {
             const selectedLocations = LOCATIONS_DB.filter(l => selectedIds.has(l.id));
@@ -83,22 +76,32 @@ export const DriverView: React.FC<DriverViewProps> = ({
         }
     };
 
-    // Lógica wrapper para completar entrega e SALVAR HISTÓRICO se acabar
+    // --- LÓGICA DE FINALIZAÇÃO CORRIGIDA ---
     const handleCompleteDelivery = async () => {
-        // Se for a última entrega, preparamos o registro de histórico
+        if (driverState.route.length === 0) return;
+
+        const currentLocation = driverState.route[0];
+        
+        // 1. Adiciona o local atual à lista de concluídos
+        const updatedCompletedList = [...completedLocations, currentLocation.name];
+        setCompletedLocations(updatedCompletedList);
+
+        // 2. Se for a ÚLTIMA entrega, salva o histórico com TUDO
         if (driverState.route.length === 1) {
             const historyItem: RouteHistory = {
                 id: `route-${Date.now()}`,
                 date: new Date().toISOString().split('T')[0],
                 driverName: driverState.name,
-                totalDeliveries: selectedIds.size || 1, // Fallback
-                locations: [driverState.route[0].name, "Rota Finalizada"],
+                totalDeliveries: updatedCompletedList.length,
+                locations: updatedCompletedList, // Lista completa acumulada
                 status: 'COMPLETED'
             };
             await saveRouteToHistoryDB(historyItem);
+            // Limpa a lista local após salvar
+            setCompletedLocations([]);
         }
         
-        // Chama a função original que remove o item da rota
+        // 3. Remove da rota ativa
         completeDelivery();
     };
 
@@ -113,7 +116,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const currentTarget = driverState.route[0];
     const isBreak = driverState.status === 'BREAK';
 
-    // ROTA ATIVA
     if (driverState.route.length > 0) {
         return (
             <div className="flex flex-col h-full w-full bg-white">
@@ -147,7 +149,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
                                 <p className="text-xl font-black mb-1 leading-tight">{currentTarget.name}</p>
                                 <p className="text-xs text-slate-400 mb-6 truncate">{currentTarget.address}</p>
                                 
-                                {/* BOTÃO DE NAVEGAÇÃO EXTERNA (GOOGLE MAPS) */}
                                 <button 
                                     onClick={openGoogleMapsRoute}
                                     className="w-full mb-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
@@ -170,7 +171,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                             </button>
                             
                             <button 
-                                onClick={handleCompleteDelivery} // Usa o novo handler
+                                onClick={handleCompleteDelivery} 
                                 disabled={isBreak}
                                 className="py-4 bg-white text-slate-900 disabled:opacity-50 disabled:bg-slate-200 rounded-xl font-bold text-sm shadow-lg active:scale-95"
                             >
@@ -182,8 +183,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     {!isBreak && (
                         <div className="space-y-2">
                             <div className="flex items-center justify-between mb-2">
-                                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cronograma</h4>
-                                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-bold">{driverState.route.length} pendentes</span>
+                                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cronograma ({driverState.route.length})</h4>
                             </div>
                             {driverState.route.map((loc, idx) => (
                                 <div key={loc.id} className="flex items-center gap-4 bg-white border border-slate-100 p-3 rounded-xl hover:shadow-md transition-all">
@@ -204,7 +204,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         );
     }
 
-    // TELA INICIAL
+    // TELA DE SELEÇÃO
     return (
         <div className="flex flex-col h-full w-full bg-white">
             <div className="flex-none p-5 bg-slate-900 text-white shadow-md flex justify-between items-center">
