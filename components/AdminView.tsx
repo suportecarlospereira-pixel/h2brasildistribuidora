@@ -1,7 +1,7 @@
 // NOME DO ARQUIVO: components/AdminView.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { DriverState, DeliveryLocation, LocationType, RouteHistory } from '../types';
-import { Users, Send, History, Calendar, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, Coffee, MapPin, ChevronDown, ChevronUp, AlertCircle, CheckSquare, Search } from 'lucide-react';
+import { Users, Send, History, Calendar, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, Coffee, MapPin, ChevronDown, ChevronUp, AlertCircle, CheckSquare } from 'lucide-react';
 import { getSmartAssistantResponse } from '../services/geminiService';
 import { deleteDriverFromDB, subscribeToHistory, deleteRouteHistoryFromDB } from '../services/dbService';
 import { H2Logo } from './Logo';
@@ -14,26 +14,32 @@ interface AdminViewProps {
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, onDistributeRoutes }) => {
+    // --- ESTADOS ---
     const [activeTab, setActiveTab] = useState<'LIVE' | 'HISTORY' | 'DISPATCH'>('LIVE');
+    
+    // IA
     const [assistantQuery, setAssistantQuery] = useState('');
     const [assistantResponse, setAssistantResponse] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     
+    // Ações de Exclusão
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
     
-    // --- FILTRO DE DATA POR PERÍODO ---
+    // Filtro de Datas (Período)
     const today = new Date().toISOString().split('T')[0];
     const [startDate, setStartDate] = useState<string>(today);
     const [endDate, setEndDate] = useState<string>(today);
     
+    // Dados
     const [historyData, setHistoryData] = useState<RouteHistory[]>([]);
     const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
-    
-    const responseRef = useRef<HTMLDivElement>(null);
     const [selectedForDispatch, setSelectedForDispatch] = useState<Set<string>>(new Set());
     const [isDistributing, setIsDistributing] = useState(false);
+    
+    const responseRef = useRef<HTMLDivElement>(null);
 
+    // --- EFEITOS ---
     useEffect(() => {
         const unsubscribe = subscribeToHistory((data) => {
             setHistoryData(data);
@@ -41,6 +47,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         return () => unsubscribe();
     }, []);
 
+    useEffect(() => {
+        if (assistantResponse && responseRef.current) {
+            responseRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [assistantResponse]);
+
+    // --- HANDLERS ---
     const handleAskAssistant = async () => {
         if (!assistantQuery.trim()) return;
         setIsLoading(true);
@@ -57,7 +70,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
             try {
                 await deleteDriverFromDB(id);
             } catch (e) {
-                alert("Erro ao excluir motorista.");
+                alert("Erro ao excluir motorista. Verifique permissões.");
             } finally {
                 setDeletingId(null);
             }
@@ -65,7 +78,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     };
 
     const handleDeleteHistory = async (e: React.MouseEvent, historyId: string, driverName: string) => {
-        e.stopPropagation();
+        e.stopPropagation(); // Impede abrir o accordion
         if (deletingHistoryId) return;
         
         if (window.confirm(`Excluir relatório de rota de "${driverName}"?`)) {
@@ -80,6 +93,22 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         }
     };
 
+    const toggleDispatchSelection = (id: string) => {
+        const newSet = new Set(selectedForDispatch);
+        if (newSet.has(id)) newSet.delete(id);
+        else newSet.add(id);
+        setSelectedForDispatch(newSet);
+    };
+
+    const handleDistribute = async () => {
+        setIsDistributing(true);
+        await onDistributeRoutes(Array.from(selectedForDispatch));
+        setIsDistributing(false);
+        setActiveTab('LIVE');
+        setSelectedForDispatch(new Set());
+    };
+
+    // --- HELPERS VISUAIS ---
     const formatLastSeen = (timestamp?: number) => {
         if (!timestamp) return 'Nunca visto';
         const diff = Date.now() - timestamp;
@@ -102,36 +131,18 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         }
     };
 
-    const toggleDispatchSelection = (id: string) => {
-        const newSet = new Set(selectedForDispatch);
-        if (newSet.has(id)) newSet.delete(id);
-        else newSet.add(id);
-        setSelectedForDispatch(newSet);
-    };
-
-    const handleDistribute = async () => {
-        setIsDistributing(true);
-        await onDistributeRoutes(Array.from(selectedForDispatch));
-        setIsDistributing(false);
-        setActiveTab('LIVE');
-        setSelectedForDispatch(new Set());
-    };
-
-    useEffect(() => {
-        if (assistantResponse && responseRef.current) {
-            responseRef.current.scrollIntoView({ behavior: 'smooth' });
-        }
-    }, [assistantResponse]);
-
-    // --- LÓGICA DE FILTRAGEM POR PERÍODO ---
+    // --- FILTROS ---
     const filteredHistory = historyData.filter(h => {
-        return h.date >= startDate && h.date <= endDate;
+        if (!startDate && !endDate) return true;
+        const hDate = h.date;
+        return hDate >= startDate && hDate <= endDate;
     });
         
-    const pendingLocations = allLocations.filter(l => l.type !== 'HEADQUARTERS');
+    const pendingLocations = allLocations.filter(l => l.type !== 'HEADQUARTERS'); // String direta para evitar bug
 
     return (
         <div className="flex flex-col h-full w-full bg-slate-50">
+            {/* --- HEADER --- */}
             <div className="flex-none p-5 bg-slate-900 text-white shadow-md z-10">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -158,8 +169,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                 </div>
             </div>
 
+            {/* --- CONTEÚDO PRINCIPAL --- */}
             <div className="flex-1 overflow-y-auto pb-20 md:pb-4 no-scrollbar">
                 
+                {/* 1. ABA MONITOR (LIVE) */}
                 {activeTab === 'LIVE' && (
                     <div className="p-4 space-y-4">
                         <div className="flex items-center justify-between px-1">
@@ -174,7 +187,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                             </div>
                         ) : (
                             allDrivers.map((driver) => (
-                                <div key={driver.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 relative">
+                                <div key={driver.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 hover:border-emerald-200 transition-colors group relative">
                                     <div className="flex items-center justify-between mb-3">
                                         <div className="flex items-center gap-3">
                                             <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black shadow-sm bg-blue-600">
@@ -198,19 +211,37 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                                 }}
                                                 disabled={deletingId === driver.id}
                                                 className="relative z-50 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all active:scale-90"
+                                                title="Excluir Motorista"
                                             >
                                                 {deletingId === driver.id ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
                                             </button>
                                         </div>
                                     </div>
+
                                     <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
                                         <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Localização Atual</p>
                                         <p className="text-xs text-slate-700 truncate font-medium">{driver.currentAddress || 'Local desconhecido'}</p>
                                     </div>
+                                    
+                                    {driver.route.length > 0 && (
+                                        <div className="mt-3 pt-3 border-t border-slate-50">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase">Carga: {driver.route.length} entregas</span>
+                                            </div>
+                                            <div className="flex gap-1 overflow-hidden">
+                                                {driver.route.slice(0, 8).map(r => (
+                                                    <div key={r.id} className="w-6 h-6 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-[8px] font-black text-emerald-700" title={r.name}>
+                                                        {r.name.charAt(0)}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             ))
                         )}
-                        
+
+                        {/* Chat IA */}
                         <div className="bg-emerald-900 rounded-3xl p-5 text-white shadow-xl shadow-emerald-900/20 relative overflow-hidden">
                             <div className="absolute -right-4 -top-4 opacity-10"><BrainCircuit className="w-32 h-32" /></div>
                             <h3 className="font-black text-xs uppercase tracking-widest mb-4 flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" /> Inteligência H2</h3>
@@ -222,8 +253,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                             )}
 
                             <div className="flex gap-2">
-                                <input type="text" value={assistantQuery} onChange={(e) => setAssistantQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAskAssistant()} placeholder="Perguntar ao sistema..." className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:bg-white focus:text-slate-900 transition-all placeholder:text-white/40" />
-                                <button onClick={handleAskAssistant} disabled={isLoading} className="bg-emerald-500 text-white w-12 rounded-2xl hover:bg-emerald-400 transition-all flex items-center justify-center disabled:opacity-50 active:scale-95 shadow-lg">
+                                <input 
+                                    type="text" 
+                                    value={assistantQuery}
+                                    onChange={(e) => setAssistantQuery(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleAskAssistant()}
+                                    placeholder="Perguntar ao sistema..."
+                                    className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:bg-white focus:text-slate-900 transition-all placeholder:text-white/40"
+                                />
+                                <button 
+                                    onClick={handleAskAssistant}
+                                    disabled={isLoading}
+                                    className="bg-emerald-500 text-white w-12 rounded-2xl hover:bg-emerald-400 transition-all flex items-center justify-center disabled:opacity-50 active:scale-95 shadow-lg"
+                                >
                                     {isLoading ? <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> : <Send className="w-4 h-4" />}
                                 </button>
                             </div>
@@ -231,12 +273,21 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                     </div>
                 )}
 
+                {/* 2. ABA FROTAS (DISPATCH) */}
                 {activeTab === 'DISPATCH' && (
                      <div className="p-4 space-y-4">
                         <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl">
-                            <h3 className="font-black text-sm uppercase tracking-widest mb-1 flex items-center gap-2"><Users className="w-4 h-4 text-emerald-400" /> Central de Frotas</h3>
+                            <h3 className="font-black text-sm uppercase tracking-widest mb-1 flex items-center gap-2">
+                                <Users className="w-4 h-4 text-emerald-400" />
+                                Central de Frotas
+                            </h3>
                             <p className="text-slate-400 text-xs mb-6">Selecione pontos pendentes para roteirização automática por IA.</p>
-                            <button onClick={handleDistribute} disabled={selectedForDispatch.size === 0 || isDistributing} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 flex items-center justify-center gap-3 transition-all active:scale-95">
+                            
+                            <button 
+                                onClick={handleDistribute}
+                                disabled={selectedForDispatch.size === 0 || isDistributing}
+                                className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-emerald-600/20 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 flex items-center justify-center gap-3 transition-all active:scale-95"
+                            >
                                 {isDistributing ? <><Loader2 className="w-4 h-4 animate-spin" /> Processando...</> : `Distribuir ${selectedForDispatch.size} Pontos`}
                             </button>
                         </div>
@@ -248,12 +299,20 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                              </div>
                              <div className="max-h-[50vh] overflow-y-auto">
                                  {pendingLocations.map(loc => (
-                                     <div key={loc.id} onClick={() => toggleDispatchSelection(loc.id)} className={`p-4 border-b border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors ${selectedForDispatch.has(loc.id) ? 'bg-emerald-50/50' : ''}`}>
+                                     <div 
+                                        key={loc.id}
+                                        onClick={() => toggleDispatchSelection(loc.id)}
+                                        className={`p-4 border-b border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors ${selectedForDispatch.has(loc.id) ? 'bg-emerald-50/50' : ''}`}
+                                     >
                                          <div className="pr-4 min-w-0">
                                              <p className="font-bold text-sm text-slate-800 truncate">{loc.name}</p>
                                              <p className="text-[10px] text-slate-400 truncate uppercase mt-0.5">{loc.address}</p>
                                          </div>
-                                         {selectedForDispatch.has(loc.id) ? <CheckCircle className="w-6 h-6 text-emerald-600 shrink-0 fill-emerald-100" /> : <Circle className="w-6 h-6 text-slate-200 shrink-0" />}
+                                         {selectedForDispatch.has(loc.id) ? (
+                                             <CheckCircle className="w-6 h-6 text-emerald-600 shrink-0 fill-emerald-100" />
+                                         ) : (
+                                             <Circle className="w-6 h-6 text-slate-200 shrink-0" />
+                                         )}
                                      </div>
                                  ))}
                              </div>
@@ -261,30 +320,33 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                      </div>
                 )}
 
+                {/* 3. ABA RELATÓRIOS (HISTORY) */}
                 {activeTab === 'HISTORY' && (
                     <div className="p-4 space-y-4">
                         <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
                             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Relatório por Período</h3>
-                            
-                            {/* --- SELETOR DE PERÍODO --- */}
                             <div className="flex flex-col gap-2">
                                 <div className="flex items-center gap-2">
                                     <div className="flex-1 bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col">
                                         <span className="text-[9px] text-slate-400 font-bold uppercase ml-1">De</span>
-                                        <div className="flex items-center gap-2">
-                                            <Calendar className="w-4 h-4 text-emerald-600" />
-                                            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-transparent w-full text-slate-900 focus:outline-none font-bold text-xs uppercase" />
-                                        </div>
+                                        <input 
+                                            type="date" 
+                                            value={startDate} 
+                                            onChange={(e) => setStartDate(e.target.value)} 
+                                            className="bg-transparent w-full text-slate-900 focus:outline-none font-bold text-xs uppercase" 
+                                        />
                                     </div>
                                     <div className="flex-1 bg-slate-50 p-2 rounded-xl border border-slate-100 flex flex-col">
                                         <span className="text-[9px] text-slate-400 font-bold uppercase ml-1">Até</span>
-                                        <div className="flex items-center gap-2">
-                                            <Calendar className="w-4 h-4 text-emerald-600" />
-                                            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-transparent w-full text-slate-900 focus:outline-none font-bold text-xs uppercase" />
-                                        </div>
+                                        <input 
+                                            type="date" 
+                                            value={endDate} 
+                                            onChange={(e) => setEndDate(e.target.value)} 
+                                            className="bg-transparent w-full text-slate-900 focus:outline-none font-bold text-xs uppercase" 
+                                        />
                                     </div>
                                 </div>
-                                <div className="text-[10px] text-center text-slate-400 font-medium">
+                                <div className="text-[10px] text-center text-slate-400 font-medium mt-1">
                                     Exibindo registros de {new Date(startDate).toLocaleDateString()} até {new Date(endDate).toLocaleDateString()}
                                 </div>
                             </div>
@@ -363,7 +425,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                             ) : (
                                 <div className="flex flex-col items-center justify-center py-20 text-slate-400 bg-white rounded-3xl border border-dashed border-slate-200">
                                     <History className="w-12 h-12 mb-4 opacity-10" />
-                                    <p className="text-xs font-black uppercase tracking-widest opacity-40">Sem registros no período</p>
+                                    <p className="text-xs font-black uppercase tracking-widest opacity-40">Sem registros no período.</p>
                                 </div>
                             )}
                         </div>
