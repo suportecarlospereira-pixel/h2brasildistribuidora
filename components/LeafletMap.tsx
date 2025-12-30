@@ -69,6 +69,7 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
                 <MapController center={centerPos} zoom={15} driverId={currentDriverId} />
                 <TileLayer attribution='&copy; CARTO' url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" keepBuffer={10} updateWhenIdle={false} />
                 
+                {/* Correção: Uso de string 'HEADQUARTERS' em vez de Enum */}
                 {locations.map(loc => (
                     <Marker key={loc.id} position={[loc.coords.lat, loc.coords.lng]} icon={loc.type === 'HEADQUARTERS' ? hqIcon : L.icon({ iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize: [20, 32], iconAnchor: [10, 32] })}>
                         <Popup><span className="font-bold">{loc.name}</span></Popup>
