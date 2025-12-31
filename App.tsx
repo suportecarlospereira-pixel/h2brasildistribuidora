@@ -12,11 +12,11 @@ import {
     updateDriverLocationInDB, 
     registerDriverInDB, 
     updateDriverRouteInDB, 
-    updateDriverStatusInDB,
-    seedDatabaseIfEmpty,
-    updateLocationStatusInDB,
-    getDriverById,
-    findDriverByName // Essencial para evitar duplicidade
+    updateDriverStatusInDB, 
+    seedDatabaseIfEmpty, 
+    updateLocationStatusInDB, 
+    getDriverById, 
+    findDriverByName 
 } from './services/dbService';
 
 const DriverView = lazy(() => import('./components/DriverView').then(m => ({ default: m.DriverView })));
@@ -42,8 +42,6 @@ const App: React.FC = () => {
   
   const [drivers, setDrivers] = useState<DriverState[]>([]);
   const [locations, setLocations] = useState<DeliveryLocation[]>([]);
-  
-  // Refs para performance do GPS
   const driversRef = useRef<DriverState[]>([]); 
   const lastPositionRef = useRef<{lat: number; lng: number} | null>(null);
   const lastUpdateTimeRef = useRef<number>(0);
@@ -61,10 +59,8 @@ const App: React.FC = () => {
 
   useEffect(() => { driversRef.current = drivers; }, [drivers]);
 
-  // INICIALIZAÇÃO
   useEffect(() => {
     seedDatabaseIfEmpty();
-
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
@@ -91,7 +87,6 @@ const App: React.FC = () => {
     };
 
     restoreSession();
-
     const unsubscribeDrivers = subscribeToDrivers((data) => setDrivers(data));
     const unsubscribeLocations = subscribeToLocations((data) => setLocations(data));
     
@@ -103,7 +98,6 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // LOGIN INTELIGENTE
   const handleDriverLogin = async () => {
     const trimmedName = inputDriverName.trim();
     if (!trimmedName) return alert("Digite seu nome.");
@@ -120,7 +114,6 @@ const App: React.FC = () => {
                 driverId = existingDriver.id;
                 driverData = { ...existingDriver, lastSeen: Date.now(), status: 'IDLE' };
             } else {
-                alert("Por favor, use um nome diferente (ex: João Silva 2) para evitar confusão.");
                 setIsLoginLoading(false);
                 return; 
             }
@@ -170,7 +163,6 @@ const App: React.FC = () => {
       setCurrentView(AppView.LOGIN);
   };
 
-  // GPS OTIMIZADO
   useEffect(() => {
     let watchId: number;
     const shouldTrack = () => {
