@@ -24,31 +24,29 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const [isOptimizing, setIsOptimizing] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     
-    // Histórico local
+    // Histórico local da sessão
     const [completedRecords, setCompletedRecords] = useState<DeliveryRecord[]>([]);
     
-    // Modal
+    // Estados do Modal
     const [showFinishModal, setShowFinishModal] = useState(false);
     const [finishStatus, setFinishStatus] = useState<'DELIVERED' | 'FAILED'>('DELIVERED');
     const [finishObs, setFinishObs] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // --- LINK OFICIAL UNIVERSAL DO GOOGLE MAPS (CORRIGIDO) ---
+    // --- CORREÇÃO FINAL: LINK OFICIAL UNIVERSAL DO GOOGLE MAPS ---
     const openGoogleMapsRoute = () => {
         if (driverState.route.length === 0) return;
         
-        // Coordenadas
         const origin = `${driverState.currentCoords.lat},${driverState.currentCoords.lng}`;
         const lastStop = driverState.route[driverState.route.length - 1];
         const destination = `${lastStop.coords.lat},${lastStop.coords.lng}`;
         
-        // Waypoints (Paradas no meio do caminho)
+        // Waypoints formatados corretamente com pipe (|)
         const waypoints = driverState.route.slice(0, -1)
             .map(loc => `${loc.coords.lat},${loc.coords.lng}`)
             .join('|');
             
-        // URL Padrão Universal (Funciona em iOS, Android e Web)
-        // Corrigido: Adicionado https e sintaxe correta das variáveis
+        // URL Padrão Oficial (Funciona 100% em Android, iOS e Web)
         const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
         
         window.open(url, '_blank');
@@ -68,7 +66,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         setCompletedRecords([]); 
         
         try {
-            // Filtro por string direta para evitar erros de referência com Enums na build
+            // Filtro seguro por string
             const selectedLocations = LOCATIONS_DB.filter(l => selectedIds.has(l.id));
             let orderedRoute = selectedLocations;
 
@@ -117,7 +115,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
             const updatedRecords = [...completedRecords, newRecord];
             setCompletedRecords(updatedRecords);
 
-            // Se for a última entrega, salva o relatório completo
+            // Salva histórico completo se for a última entrega
             if (driverState.route.length === 1) {
                 const historyItem: RouteHistory = {
                     id: `route-${Date.now()}`,
@@ -135,7 +133,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
             setShowFinishModal(false);
             completeDelivery();
         } catch (e) {
-            alert("Erro ao salvar. Verifique sua conexão.");
+            alert("Erro ao salvar. Tente novamente.");
         } finally {
             setIsSubmitting(false);
         }
@@ -176,10 +174,10 @@ export const DriverView: React.FC<DriverViewProps> = ({
                                 <div className="relative mt-1">
                                     <MessageSquare className="w-4 h-4 absolute top-3 left-3 text-slate-400" />
                                     <textarea 
-                                        value={finishObs}
-                                        onChange={(e) => setFinishObs(e.target.value)}
-                                        placeholder={finishStatus === 'DELIVERED' ? "Quem recebeu?" : "Motivo da falha?"}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 h-20 resize-none"
+                                        value={finishObs} 
+                                        onChange={(e) => setFinishObs(e.target.value)} 
+                                        placeholder={finishStatus === 'DELIVERED' ? "Quem recebeu?" : "Motivo da falha?"} 
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 h-20 resize-none" 
                                     />
                                 </div>
                             </div>
@@ -194,7 +192,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     </div>
                 )}
 
-                {/* HEADER */}
                 <div className="flex-none p-5 bg-slate-900 text-white shadow-md flex justify-between items-center">
                     <div className="flex items-center gap-3">
                         <H2Logo className="h-6 w-auto" showText={false} variant="light" />
@@ -208,7 +205,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     </button>
                 </div>
 
-                {/* CORPO */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20 md:pb-4">
                     <div className={`rounded-2xl p-5 shadow-xl relative overflow-hidden transition-all duration-500 ${isBreak ? 'bg-amber-500 text-white' : 'bg-slate-900 text-white'}`}>
                         <div className="absolute top-0 right-0 p-4 opacity-10">{isBreak ? <Coffee className="w-20 h-20" /> : <Truck className="w-20 h-20" />}</div>
@@ -258,61 +254,4 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 </div>
             </div>
         );
-    }
-
-    // TELA DE SELEÇÃO
-    return (
-        <div className="flex flex-col h-full w-full bg-white">
-            <div className="flex-none p-5 bg-slate-900 text-white shadow-md flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                    <H2Logo className="h-6 w-auto" showText={false} variant="light" />
-                    <div className="border-l border-slate-700 pl-3">
-                        <h2 className="text-sm font-bold tracking-tight">NOVO TURNO</h2>
-                        <p className="text-slate-400 text-[10px] font-medium uppercase">{driverState.name}</p>
-                    </div>
-                </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20 md:pb-4">
-                {errorMsg && (
-                    <div className="bg-red-50 border border-red-200 p-4 rounded-xl flex items-center gap-3 text-red-800 text-xs font-bold animate-pulse">
-                        <ShieldAlert className="w-5 h-5 shrink-0" /> {errorMsg}
-                    </div>
-                )}
-
-                <div className="bg-slate-50 p-6 rounded-3xl border border-dashed border-slate-300">
-                    <h3 className="font-bold text-slate-800 mb-1">Montar Rota do Dia</h3>
-                    <p className="text-xs text-slate-500 mb-6">Selecione os destinos. A IA otimizará a sequência.</p>
-                    
-                    <div className="grid grid-cols-1 gap-2">
-                        {LOCATIONS_DB.filter(l => l.type !== 'HEADQUARTERS').map(loc => (
-                            <div 
-                                key={loc.id}
-                                onClick={() => toggleSelection(loc.id)}
-                                className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center justify-between transition-all active:scale-[0.98] ${selectedIds.has(loc.id) ? 'bg-emerald-50 border-emerald-500' : 'bg-white border-slate-100 hover:border-slate-300'}`}
-                            >
-                                <div className="overflow-hidden pr-4">
-                                    <p className="font-bold text-sm text-slate-800 truncate">{loc.name}</p>
-                                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">{loc.type}</p>
-                                </div>
-                                {selectedIds.has(loc.id) ? (
-                                    <CheckCircle className="w-6 h-6 text-emerald-600 fill-emerald-100 shrink-0" />
-                                ) : (
-                                    <Circle className="w-6 h-6 text-slate-200 shrink-0" />
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                <button 
-                    disabled={selectedIds.size === 0 || isOptimizing}
-                    onClick={handleStartRoute}
-                    className="w-full py-5 bg-emerald-600 disabled:bg-slate-200 text-white rounded-2xl font-black text-lg shadow-xl shadow-emerald-200 active:scale-95 transition-all flex items-center justify-center gap-3"
-                >
-                    {isOptimizing ? <><Loader2 className="w-6 h-6 animate-spin" /> Processando...</> : <><MapPin className="w-6 h-6" /> Iniciar Rota ({selectedIds.size})</>}
-                </button>
-            </div>
-        </div>
-    );
-};
+    };
