@@ -48,7 +48,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
             .join('|');
             
         // URL Padrão Universal (Funciona em iOS, Android e Web)
-        // Documentação: https://developers.google.com/maps/documentation/urls/get-started#directions-action
+        // Corrigido: Adicionado https e sintaxe correta das variáveis
         const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
         
         window.open(url, '_blank');
@@ -211,9 +211,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 {/* CORPO */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20 md:pb-4">
                     <div className={`rounded-2xl p-5 shadow-xl relative overflow-hidden transition-all duration-500 ${isBreak ? 'bg-amber-500 text-white' : 'bg-slate-900 text-white'}`}>
-                        <div className="absolute top-0 right-0 p-4 opacity-10">
-                            {isBreak ? <Coffee className="w-20 h-20" /> : <Truck className="w-20 h-20" />}
-                        </div>
+                        <div className="absolute top-0 right-0 p-4 opacity-10">{isBreak ? <Coffee className="w-20 h-20" /> : <Truck className="w-20 h-20" />}</div>
                         
                         {isBreak ? (
                             <div className="text-center py-4">
@@ -247,9 +245,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
                             </div>
                             {driverState.route.map((loc, idx) => (
                                 <div key={loc.id} className="flex items-center gap-4 bg-white border border-slate-100 p-3 rounded-xl hover:shadow-md transition-all">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${idx === 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-50 text-slate-300'}`}>
-                                        {idx + 1}
-                                    </div>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${idx === 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-50 text-slate-300'}`}>{idx + 1}</div>
                                     <div className="flex-1 min-w-0">
                                         <p className={`font-bold text-sm truncate ${idx === 0 ? 'text-slate-900' : 'text-slate-400'}`}>{loc.name}</p>
                                         <p className="text-[10px] text-slate-400 truncate">{loc.address}</p>
@@ -264,7 +260,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
         );
     }
 
-    // TELA INICIAL
+    // TELA DE SELEÇÃO
     return (
         <div className="flex flex-col h-full w-full bg-white">
             <div className="flex-none p-5 bg-slate-900 text-white shadow-md flex justify-between items-center">
@@ -289,7 +285,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
                     <p className="text-xs text-slate-500 mb-6">Selecione os destinos. A IA otimizará a sequência.</p>
                     
                     <div className="grid grid-cols-1 gap-2">
-                        {/* Correção: Uso de string 'HEADQUARTERS' para evitar ReferenceError */}
                         {LOCATIONS_DB.filter(l => l.type !== 'HEADQUARTERS').map(loc => (
                             <div 
                                 key={loc.id}
