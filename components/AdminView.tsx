@@ -106,7 +106,6 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         return h.date >= startDate && h.date <= endDate;
     });
         
-    // Correção: Uso de string 'HEADQUARTERS'
     const pendingLocations = allLocations.filter(l => l.type !== 'HEADQUARTERS');
 
     return (
