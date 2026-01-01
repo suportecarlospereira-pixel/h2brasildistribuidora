@@ -1,128 +1,163 @@
-import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  setDoc, 
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  onSnapshot, 
-  query, 
-  orderBy,
-  Firestore
-} from 'firebase/firestore';
-import { Delivery, Driver } from '../types';
-import { INITIAL_DELIVERIES, DRIVERS } from '../constants';
-import { firebaseConfig } from '../firebaseConfig';
+// NOME DO ARQUIVO: services/dbService.ts
+import { db, isConfigured } from '../firebaseConfig';
+import { collection, doc, setDoc, updateDoc, onSnapshot, query, getDocs, writeBatch, deleteDoc, getDoc, limit, where, orderBy } from 'firebase/firestore';
+import { DeliveryLocation, DriverState, DriverStatus, RouteHistory } from '../types';
+import { LOCATIONS_DB, MOCK_DRIVERS_LIST } from '../constants';
 
-let db: Firestore | null = null;
+const DRIVERS_COLLECTION = 'drivers';
+const LOCATIONS_COLLECTION = 'locations';
+const HISTORY_COLLECTION = 'history';
+const INACTIVITY_THRESHOLD = 5 * 24 * 60 * 60 * 1000; 
 
-try {
-  if (typeof window !== 'undefined') {
-    const app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
-  }
-} catch (e) {
-  console.error("Erro ao inicializar Firebase:", e);
+const sanitizeForFirestore = (obj: any): any => {
+    return JSON.parse(JSON.stringify(obj, (key, value) => {
+        return value === undefined ? null : value;
+    }));
+};
+
+export const seedDatabaseIfEmpty = async () => {
+    if (!isConfigured) return;
+    try {
+        const locationsSnap = await getDocs(collection(db, LOCATIONS_COLLECTION));
+        if (locationsSnap.empty) {
+            const batch = writeBatch(db);
+            LOCATIONS_DB.forEach(loc => {
+                const docRef = doc(db, LOCATIONS_COLLECTION, loc.id);
+                batch.set(docRef, sanitizeForFirestore(loc));
+            });
+            await batch.commit();
+        }
+    } catch (e) { console.warn("Offline: Banco não semeado."); }
+};
+
+export const getDriverById = async (driverId: string): Promise<DriverState | null> => {
+    if (!isConfigured) return null;
+    try {
+        const docRef = doc(db, DRIVERS_COLLECTION, driverId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) return docSnap.data() as DriverState;
+        return null;
+    } catch (e) { return null; }
+};
+
+export const findDriverByName = async (name: string): Promise<DriverState | null> => {
+    if (!isConfigured) return null;
+    try {
+        const q = query(collection(db, DRIVERS_COLLECTION), where("name", "==", name));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) return querySnapshot.docs[0].data() as DriverState;
+        return null;
+    } catch (e) { return null; }
 }
 
-export const dbService = {
-  // --- ENTREGAS ---
+export const subscribeToDrivers = (callback: (drivers: DriverState[]) => void) => {
+    if (!isConfigured) { callback(MOCK_DRIVERS_LIST); return () => {}; }
+    try {
+        const q = query(collection(db, DRIVERS_COLLECTION));
+        return onSnapshot(q, (snapshot) => {
+            const now = Date.now();
+            const drivers: DriverState[] = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data() as DriverState;
+                if (!data.lastSeen || (now - data.lastSeen < INACTIVITY_THRESHOLD)) drivers.push(data);
+            });
+            callback(drivers);
+        }, () => callback(MOCK_DRIVERS_LIST));
+    } catch (e) { callback(MOCK_DRIVERS_LIST); return () => {}; }
+};
 
-  subscribeDeliveries(callback: (deliveries: Delivery[]) => void) {
-    if (!db) return () => {};
-    // Ordena por status para organizar a lista
-    const q = query(collection(db, "deliveries"), orderBy("id", "asc"));
+export const updateDriverLocationInDB = async (driverId: string, lat: number, lng: number, address: string, status: DriverStatus = 'MOVING') => {
+    if (!isConfigured) return;
+    try {
+        const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
+        await updateDoc(driverRef, {
+            currentCoords: { lat, lng },
+            currentAddress: address || "Desconhecido",
+            status: status,
+            lastSeen: Date.now()
+        });
+    } catch (e) { }
+};
+
+export const updateDriverStatusInDB = async (driverId: string, status: DriverStatus) => {
+    if (!isConfigured) return;
+    try {
+        const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
+        await updateDoc(driverRef, { status, lastSeen: Date.now() });
+    } catch (e) { }
+};
+
+export const registerDriverInDB = async (driver: DriverState) => {
+    if (!isConfigured) return;
+    try {
+        const data = sanitizeForFirestore({ ...driver, lastSeen: Date.now() });
+        await setDoc(doc(db, DRIVERS_COLLECTION, driver.id), data, { merge: true });
+    } catch (e) { }
+};
+
+export const deleteDriverFromDB = async (driverId: string) => {
+    if (!isConfigured) return;
+    try { await deleteDoc(doc(db, DRIVERS_COLLECTION, driverId)); } catch (e) { throw e; }
+};
+
+export const updateDriverRouteInDB = async (driverId: string, route: DeliveryLocation[]) => {
+    if (!isConfigured) return;
+    try {
+        const driverRef = doc(db, DRIVERS_COLLECTION, driverId);
+        const cleanRoute = sanitizeForFirestore(route);
+        await updateDoc(driverRef, { route: cleanRoute, lastSeen: Date.now() });
+    } catch (e) { throw e; }
+};
+
+export const saveRouteToHistoryDB = async (historyItem: RouteHistory) => {
+    if (!isConfigured) return;
+    try {
+        const docId = `history-${historyItem.driverName}-${Date.now()}`;
+        const docRef = doc(db, HISTORY_COLLECTION, docId);
+        await setDoc(docRef, sanitizeForFirestore({ ...historyItem, id: docId }));
+    } catch (e) { }
+};
+
+export const deleteRouteHistoryFromDB = async (historyId: string) => {
+    if (!isConfigured) return;
+    try { await deleteDoc(doc(db, HISTORY_COLLECTION, historyId)); } catch (e) { throw e; }
+};
+
+export const subscribeToHistory = (callback: (history: RouteHistory[]) => void) => {
+    if (!isConfigured) return () => {};
+    try {
+        const q = query(collection(db, HISTORY_COLLECTION), orderBy('date', 'desc'), limit(300)); 
+        return onSnapshot(q, (snapshot) => {
+            const history: RouteHistory[] = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data() as RouteHistory;
+                history.push({ ...data, id: doc.id });
+            });
+            callback(history);
+        }, () => {
+            // Fallback de ordenação manual se faltar índice
+            const qSimple = query(collection(db, HISTORY_COLLECTION), limit(100));
+            onSnapshot(qSimple, (snap) => {
+                const h: RouteHistory[] = [];
+                snap.forEach(d => h.push({ ...(d.data() as RouteHistory), id: d.id }));
+                h.sort((a, b) => b.date.localeCompare(a.date));
+                callback(h);
+            });
+        });
+    } catch (e) { return () => {}; }
+};
+
+export const subscribeToLocations = (callback: (locations: DeliveryLocation[]) => void) => {
+    if (!isConfigured) { callback(LOCATIONS_DB); return () => {}; }
+    const q = query(collection(db, LOCATIONS_COLLECTION));
     return onSnapshot(q, (snapshot) => {
-      const deliveries = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Delivery));
-      callback(deliveries);
-    });
-  },
+        const locations: DeliveryLocation[] = [];
+        snapshot.forEach((doc) => locations.push(doc.data() as DeliveryLocation));
+        callback(locations.length ? locations : LOCATIONS_DB);
+    }, () => callback(LOCATIONS_DB));
+};
 
-  // ADICIONAR NOVA ENTREGA
-  async addDelivery(delivery: Omit<Delivery, 'id'>) {
-    if (!db) return;
-    try {
-      // Cria um ID baseado no timestamp para garantir ordem
-      const newId = `DEL-${Date.now()}`;
-      await setDoc(doc(db, "deliveries", newId), { ...delivery, id: newId });
-    } catch (e) {
-      console.error("Erro ao criar entrega:", e);
-      throw e;
-    }
-  },
-
-  // EDITAR ENTREGA EXISTENTE
-  async updateDelivery(delivery: Delivery) {
-    if (!db) return;
-    try {
-      const docRef = doc(db, "deliveries", delivery.id);
-      await setDoc(docRef, delivery, { merge: true });
-    } catch (e) {
-      console.error("Erro ao atualizar entrega:", e);
-      throw e;
-    }
-  },
-
-  // EXCLUIR ENTREGA
-  async deleteDelivery(deliveryId: string) {
-    if (!db) return;
-    try {
-      await deleteDoc(doc(db, "deliveries", deliveryId));
-    } catch (e) {
-      console.error("Erro ao excluir entrega:", e);
-      throw e;
-    }
-  },
-
-  async updateDeliveryStatus(deliveryId: string, status: Delivery['status'], notes?: string) {
-    if (!db) return;
-    const updateData: any = { status };
-    if (notes) updateData.notes = notes;
-    if (status === 'DELIVERED') updateData.completedAt = Date.now();
-    
-    await updateDoc(doc(db, "deliveries", deliveryId), updateData);
-  },
-
-  async assignDriver(deliveryId: string, driverId: string) {
-    if (!db) return;
-    await updateDoc(doc(db, "deliveries", deliveryId), { 
-      driverId,
-      status: 'PENDING' // Reseta status se mudar motorista
-    });
-  },
-
-  // --- MOTORISTAS ---
-
-  subscribeDrivers(callback: (drivers: Driver[]) => void) {
-    if (!db) return () => {};
-    return onSnapshot(collection(db, "drivers"), (snapshot) => {
-      const drivers = snapshot.docs.map(doc => doc.data() as Driver);
-      callback(drivers);
-    });
-  },
-
-  async updateDriverLocation(driverId: string, lat: number, lng: number) {
-    if (!db) return;
-    await setDoc(doc(db, "drivers", driverId), {
-      id: driverId,
-      name: DRIVERS.find(d => d.id === driverId)?.name || 'Desconhecido',
-      lat,
-      lng,
-      lastUpdate: Date.now()
-    }, { merge: true });
-  },
-
-  // --- INICIALIZAÇÃO ---
-
-  async init() {
-    if (!db) return;
-    // Se não tiver entregas, carrega as iniciais (apenas na primeira vez)
-    // Isso evita apagar dados novos
-    /* NOTA: Comentei a inicialização automática para evitar que ela sobrescreva
-       suas edições manuais toda vez que recarregar. 
-       Se o banco estiver vazio, você pode usar o botão "Adicionar" na tela.
-    */
-  }
+export const updateLocationStatusInDB = async (locationId: string, status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED') => {
+    if (!isConfigured) return;
+    try { await updateDoc(doc(db, LOCATIONS_COLLECTION, locationId), { status }); } catch (e) { }
 };
