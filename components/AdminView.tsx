@@ -1,9 +1,9 @@
 // NOME DO ARQUIVO: components/AdminView.tsx
 import React, { useState, useRef, useEffect } from 'react';
-import { DriverState, DeliveryLocation, RouteHistory } from '../types';
-import { Users, Send, History, Calendar, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, Coffee, MapPin, ChevronDown, ChevronUp, AlertCircle, CheckSquare } from 'lucide-react';
+import { DriverState, DeliveryLocation, RouteHistory, LocationType } from '../types';
+import { Users, Send, History, Calendar, Sparkles, CheckCircle, Circle, BrainCircuit, Truck, Trash2, Clock, Loader2, Coffee, MapPin, ChevronDown, ChevronUp, AlertCircle, CheckSquare, MapPinned, Plus, X } from 'lucide-react';
 import { getSmartAssistantResponse } from '../services/geminiService';
-import { deleteDriverFromDB, subscribeToHistory, deleteRouteHistoryFromDB } from '../services/dbService';
+import { deleteDriverFromDB, subscribeToHistory, deleteRouteHistoryFromDB, addLocationToDB, deleteLocationFromDB } from '../services/dbService';
 import { H2Logo } from './Logo';
 
 interface AdminViewProps {
@@ -14,13 +14,14 @@ interface AdminViewProps {
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, onDistributeRoutes }) => {
-    const [activeTab, setActiveTab] = useState<'LIVE' | 'HISTORY' | 'DISPATCH'>('LIVE');
+    const [activeTab, setActiveTab] = useState<'LIVE' | 'HISTORY' | 'DISPATCH' | 'LOCATIONS'>('LIVE');
     const [assistantQuery, setAssistantQuery] = useState('');
     const [assistantResponse, setAssistantResponse] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+    const [deletingLocId, setDeletingLocId] = useState<string | null>(null);
     
     // Filtro por Período
     const today = new Date().toISOString().split('T')[0];
@@ -33,6 +34,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     const responseRef = useRef<HTMLDivElement>(null);
     const [selectedForDispatch, setSelectedForDispatch] = useState<Set<string>>(new Set());
     const [isDistributing, setIsDistributing] = useState(false);
+
+    // Estado do Formulário de Novo Local
+    const [showLocForm, setShowLocForm] = useState(false);
+    const [newLocName, setNewLocName] = useState('');
+    const [newLocAddress, setNewLocAddress] = useState('');
+    const [newLocType, setNewLocType] = useState<LocationType>(LocationType.UBS);
+    const [newLocLat, setNewLocLat] = useState('');
+    const [newLocLng, setNewLocLng] = useState('');
+    const [isSavingLoc, setIsSavingLoc] = useState(false);
 
     useEffect(() => {
         const unsubscribe = subscribeToHistory((data) => setHistoryData(data));
@@ -65,6 +75,38 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         }
     };
 
+    const handleAddLocation = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newLocName || !newLocLat || !newLocLng) return alert("Preencha os campos obrigatórios.");
+        
+        setIsSavingLoc(true);
+        try {
+            const newLocation: DeliveryLocation = {
+                id: `loc-${Date.now()}`,
+                name: newLocName,
+                address: newLocAddress || "Endereço não informado",
+                type: newLocType,
+                coords: { lat: parseFloat(newLocLat), lng: parseFloat(newLocLng) },
+                status: 'PENDING'
+            };
+            await addLocationToDB(newLocation);
+            setShowLocForm(false);
+            setNewLocName(''); setNewLocAddress(''); setNewLocLat(''); setNewLocLng('');
+            alert("Local adicionado com sucesso!");
+        } catch (error) {
+            alert("Erro ao salvar local.");
+        } finally {
+            setIsSavingLoc(false);
+        }
+    };
+
+    const handleDeleteLocation = async (id: string, name: string) => {
+        if (confirm(`Excluir o local "${name}"?`)) {
+            setDeletingLocId(id);
+            try { await deleteLocationFromDB(id); } catch(e) { alert("Erro ao excluir."); } finally { setDeletingLocId(null); }
+        }
+    };
+
     const formatLastSeen = (timestamp?: number) => {
         if (!timestamp) return 'Nunca visto';
         const diff = Date.now() - timestamp;
@@ -79,6 +121,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
     const getStatusBadge = (status: string) => {
         if (status === 'BREAK') return <span className="text-[9px] px-2 py-1 rounded-full font-bold bg-amber-100 text-amber-800 flex items-center gap-1 border border-amber-200"><Coffee className="w-3 h-3"/> Almoço</span>;
         if (status === 'MOVING') return <span className="text-[9px] px-2 py-1 rounded-full font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1 border border-emerald-200"><MapPin className="w-3 h-3"/> Em Rota</span>;
+        if (status === 'EMERGENCY') return <span className="text-[9px] px-2 py-1 rounded-full font-bold bg-red-600 text-white flex items-center gap-1 border border-red-700 animate-pulse"><AlertCircle className="w-3 h-3"/> PÂNICO</span>;
         return <span className="text-[9px] px-2 py-1 rounded-full font-bold bg-slate-100 text-slate-600 border border-slate-200">Parado</span>;
     };
 
@@ -106,7 +149,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
         return h.date >= startDate && h.date <= endDate;
     });
         
-    const pendingLocations = allLocations.filter(l => l.type !== 'HEADQUARTERS');
+    const pendingLocations = allLocations.filter(l => l.type !== 'HEADQUARTERS' && l.status !== 'COMPLETED');
 
     return (
         <div className="flex flex-col h-full w-full bg-slate-50">
@@ -120,10 +163,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                         </div>
                     </div>
                 </div>
-                <div className="flex space-x-1 mt-6 bg-slate-800/50 p-1 rounded-lg">
-                    {['LIVE', 'DISPATCH', 'HISTORY'].map((tab) => (
-                        <button key={tab} onClick={() => setActiveTab(tab as any)} className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-md transition-all ${activeTab === tab ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
-                            {tab === 'LIVE' ? 'Monitor' : tab === 'DISPATCH' ? 'Frotas' : 'Relatórios'}
+                <div className="flex space-x-1 mt-6 bg-slate-800/50 p-1 rounded-lg overflow-x-auto no-scrollbar">
+                    {[
+                        { id: 'LIVE', label: 'Monitor' },
+                        { id: 'DISPATCH', label: 'Frotas' },
+                        { id: 'LOCATIONS', label: 'Locais' },
+                        { id: 'HISTORY', label: 'Relatórios' }
+                    ].map((tab) => (
+                        <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex-1 min-w-[70px] py-2.5 text-[10px] font-black uppercase tracking-widest rounded-md transition-all ${activeTab === tab.id ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+                            {tab.label}
                         </button>
                     ))}
                 </div>
@@ -203,7 +251,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                                  <button onClick={() => setSelectedForDispatch(new Set(pendingLocations.map(l => l.id)))} className="text-[10px] text-emerald-600 font-black uppercase">Marcar Todos</button>
                              </div>
                              <div className="max-h-[50vh] overflow-y-auto">
-                                 {pendingLocations.map(loc => (
+                                 {pendingLocations.length === 0 ? <p className="p-4 text-center text-xs text-slate-400 italic">Nenhum ponto pendente.</p> :
+                                 pendingLocations.map(loc => (
                                      <div key={loc.id} onClick={() => toggleDispatchSelection(loc.id)} className={`p-4 border-b border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors ${selectedForDispatch.has(loc.id) ? 'bg-emerald-50/50' : ''}`}>
                                          <div className="pr-4 min-w-0">
                                              <p className="font-bold text-sm text-slate-800 truncate">{loc.name}</p>
@@ -215,6 +264,59 @@ export const AdminView: React.FC<AdminViewProps> = ({ allDrivers, allLocations, 
                              </div>
                         </div>
                      </div>
+                )}
+                
+                {activeTab === 'LOCATIONS' && (
+                    <div className="p-4 space-y-4">
+                         <div className="flex items-center justify-between px-1">
+                            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Gestão de Pontos</h3>
+                            <button onClick={() => setShowLocForm(true)} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-md active:scale-95 transition-transform"><Plus className="w-4 h-4"/> Novo Ponto</button>
+                        </div>
+
+                        {showLocForm && (
+                            <form onSubmit={handleAddLocation} className="bg-white p-4 rounded-3xl border border-emerald-100 shadow-xl animate-in fade-in slide-in-from-top-4">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h4 className="font-bold text-slate-800">Novo Local</h4>
+                                    <button type="button" onClick={() => setShowLocForm(false)}><X className="w-5 h-5 text-slate-400" /></button>
+                                </div>
+                                <div className="space-y-3">
+                                    <input type="text" placeholder="Nome do Local (ex: UBS Central)" value={newLocName} onChange={e => setNewLocName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-emerald-500 outline-none" required />
+                                    <input type="text" placeholder="Endereço Completo" value={newLocAddress} onChange={e => setNewLocAddress(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-emerald-500 outline-none" required />
+                                    <div className="flex gap-2">
+                                        <select value={newLocType} onChange={e => setNewLocType(e.target.value as LocationType)} className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-bold uppercase text-slate-600 focus:ring-2 focus:ring-emerald-500 outline-none flex-1">
+                                            {Object.values(LocationType).map(t => <option key={t} value={t}>{t}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <input type="number" step="any" placeholder="Latitude (ex: -26.90)" value={newLocLat} onChange={e => setNewLocLat(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-emerald-500 outline-none" required />
+                                        <input type="number" step="any" placeholder="Longitude (ex: -48.66)" value={newLocLng} onChange={e => setNewLocLng(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-emerald-500 outline-none" required />
+                                    </div>
+                                    <button type="submit" disabled={isSavingLoc} className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold shadow-lg flex justify-center items-center gap-2">
+                                        {isSavingLoc ? <Loader2 className="w-4 h-4 animate-spin"/> : "Salvar Local"}
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+
+                        <div className="space-y-2">
+                            {allLocations.filter(l => l.type !== 'HEADQUARTERS').map(loc => (
+                                <div key={loc.id} className="bg-white p-3 rounded-2xl border border-slate-100 flex items-center justify-between group">
+                                    <div className="flex items-center gap-3 overflow-hidden">
+                                        <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center shrink-0">
+                                            <MapPinned className="w-4 h-4 text-slate-400" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="font-bold text-sm text-slate-800 truncate">{loc.name}</p>
+                                            <p className="text-[10px] text-slate-400 uppercase">{loc.type} • {loc.address}</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => handleDeleteLocation(loc.id, loc.name)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                        {deletingLocId === loc.id ? <Loader2 className="w-4 h-4 animate-spin text-red-500"/> : <Trash2 className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 )}
 
                 {activeTab === 'HISTORY' && (
