@@ -23,7 +23,7 @@ import {
 const DriverView = lazy(() => import('./components/DriverView').then(m => ({ default: m.DriverView })));
 const AdminView = lazy(() => import('./components/AdminView').then(m => ({ default: m.AdminView })));
 
-const ADMIN_PASSWORD = "lulaladrao"; // ⚠️ SEGURANÇA: Mover para variável de ambiente ou usar Auth real.
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "admin123";
 const STORAGE_KEY_DRIVER = "H2_DRIVER_ID";
 const STORAGE_KEY_VIEW = "H2_LAST_VIEW";
 const OFFLINE_QUEUE_KEY = "OFFLINE_QUEUE";
