@@ -6,17 +6,42 @@ import { DeliveryLocation, DriverState } from '../types';
 import { ITAJAI_CENTER } from '../constants';
 import { Navigation as NavIcon, LocateFixed } from 'lucide-react';
 
-// --- FUNÇÃO AUXILIAR: CALCULAR ROTAÇÃO (BEARING) ---
+// --- ESTILOS CSS PARA O MAPA (Pulse Effect) ---
+const pulseStyles = `
+@keyframes pulse-ring {
+  0% { transform: scale(0.33); opacity: 0.8; }
+  80%, 100% { opacity: 0; }
+}
+@keyframes pulse-dot {
+  0% { transform: scale(0.8); }
+  50% { transform: scale(1); }
+  100% { transform: scale(0.8); }
+}
+.pulsing-marker { position: relative; }
+.pulsing-marker:before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border-radius: 50%;
+  border: 10px solid #10b981; /* Emerald-500 */
+  box-shadow: 0 0 15px #10b981;
+  animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+  z-index: -1;
+}
+`;
+
+const styleSheet = document.createElement("style");
+styleSheet.innerText = pulseStyles;
+document.head.appendChild(styleSheet);
+
+// --- FUNÇÃO AUXILIAR: CALCULAR ROTAÇÃO ---
 const calculateBearing = (startLat: number, startLng: number, destLat: number, destLng: number) => {
     const startLatRad = (startLat * Math.PI) / 180;
     const startLngRad = (startLng * Math.PI) / 180;
     const destLatRad = (destLat * Math.PI) / 180;
     const destLngRad = (destLng * Math.PI) / 180;
-
     const y = Math.sin(destLngRad - startLngRad) * Math.cos(destLatRad);
-    const x = Math.cos(startLatRad) * Math.sin(destLatRad) -
-              Math.sin(startLatRad) * Math.cos(destLatRad) * Math.cos(destLngRad - startLngRad);
-
+    const x = Math.cos(startLatRad) * Math.sin(destLatRad) - Math.sin(startLatRad) * Math.cos(destLatRad) * Math.cos(destLngRad - startLngRad);
     let brng = Math.atan2(y, x);
     brng = (brng * 180) / Math.PI;
     return (brng + 360) % 360;
@@ -28,6 +53,15 @@ const hqIcon = new L.Icon({
     shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
     iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
 });
+
+// Ícone Animado para o Destino Atual
+const createPulsingTargetIcon = () => {
+    return L.divIcon({
+        className: 'pulsing-marker',
+        html: `<div style="width: 20px; height: 20px; background: #10b981; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"></div>`,
+        iconSize: [20, 20], iconAnchor: [10, 10],
+    });
+};
 
 const createNumberedIcon = (number: number, isNext: boolean) => {
     const color = isNext ? '#10b981' : '#64748b';
@@ -55,53 +89,32 @@ const createDriverIcon = (colorHex: string, isSelected: boolean, rotation: numbe
     });
 };
 
-// --- COMPONENTE: ROTA INTELIGENTE OTIMIZADA ---
-// 1. Desenha uma linha reta simples (dinâmica) do Carro até a Parada 1
-// 2. Busca na API (estática) a rota da Parada 1 até a Parada N (só chama quando a rota muda)
+// --- COMPONENTE: ROTA INTELIGENTE ---
 const SmartRoutePolyline: React.FC<{ driverPos: [number, number], stops: DeliveryLocation[], color: string, isSelected: boolean }> = ({ driverPos, stops, color, isSelected }) => {
     const [staticRoutePositions, setStaticRoutePositions] = useState<[number, number][]>([]);
     
-    // Efeito para buscar rota da API (Apenas quando a lista de STOPS muda, ignora movimento do GPS)
     useEffect(() => {
-        if (!stops || stops.length < 2) { 
-            setStaticRoutePositions([]); 
-            return; 
-        }
-        
-        // Se não estiver focado, não gasta API
-        if (!isSelected) {
-            setStaticRoutePositions(stops.map(s => [s.coords.lat, s.coords.lng]));
-            return;
-        }
+        if (!stops || stops.length < 2) { setStaticRoutePositions([]); return; }
+        if (!isSelected) { setStaticRoutePositions(stops.map(s => [s.coords.lat, s.coords.lng])); return; }
 
         const fetchRoute = async () => {
             try {
-                // Rota entre as paradas (ignora o motorista aqui para economizar API)
                 const coordsString = stops.map(s => `${s.coords.lng},${s.coords.lat}`).join(';');
                 const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson`);
                 const data = await response.json();
                 if (data.routes?.[0]) {
                     setStaticRoutePositions(data.routes[0].geometry.coordinates.map((c: number[]) => [c[1], c[0]]));
                 }
-            } catch (e) {
-                // Fallback linha reta
-                setStaticRoutePositions(stops.map(s => [s.coords.lat, s.coords.lng]));
-            }
+            } catch (e) { setStaticRoutePositions(stops.map(s => [s.coords.lat, s.coords.lng])); }
         };
         fetchRoute();
-    }, [stops, isSelected]); // REMOVIDO driverPos das dependências!
+    }, [stops, isSelected]);
 
     if (!isSelected || stops.length === 0) return null;
 
     return (
         <>
-            {/* 1. Link Dinâmico: Linha Tracejada do Carro até a Primeira Parada (Atualiza 60fps) */}
-            <Polyline 
-                positions={[driverPos, [stops[0].coords.lat, stops[0].coords.lng]]} 
-                pathOptions={{ color: color, weight: 3, opacity: 0.8, dashArray: '10, 10', className: 'animate-pulse' }} 
-            />
-
-            {/* 2. Rota Estática: Caminho real entre as paradas (Cacheado) */}
+            <Polyline positions={[driverPos, [stops[0].coords.lat, stops[0].coords.lng]]} pathOptions={{ color: color, weight: 3, opacity: 0.8, dashArray: '10, 10', className: 'animate-pulse' }} />
             {staticRoutePositions.length > 0 && (
                 <>
                     <Polyline positions={staticRoutePositions} pathOptions={{ color: 'white', weight: 8, opacity: 0.8, lineCap: 'round', lineJoin: 'round' }} />
@@ -166,9 +179,20 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
                 <TileLayer attribution='&copy; CARTO' url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
                 
                 {locations.map(loc => {
+                    // Verifica se este local é o destino atual do motorista ativo
                     const isNextStop = activeDriver?.route[0]?.id === loc.id;
+                    
                     return (
-                        <Marker key={loc.id} position={[loc.coords.lat, loc.coords.lng]} icon={loc.type === 'HEADQUARTERS' ? hqIcon : L.icon({ iconUrl: isNextStop ? 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png' : 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] })} zIndexOffset={isNextStop ? 1000 : 0}>
+                        <Marker 
+                            key={loc.id} 
+                            position={[loc.coords.lat, loc.coords.lng]} 
+                            // Se for a próxima parada, usa o ícone pulsante
+                            icon={loc.type === 'HEADQUARTERS' ? hqIcon : (isNextStop ? createPulsingTargetIcon() : L.icon({ 
+                                iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', 
+                                iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] 
+                            }))}
+                            zIndexOffset={isNextStop ? 1000 : 0}
+                        >
                             <Popup><div className="font-bold text-sm">{loc.name}</div><div className="text-[10px] uppercase text-slate-500">{loc.address}</div></Popup>
                         </Marker>
                     );
@@ -184,9 +208,11 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
                             <Marker position={[driver.currentCoords.lat, driver.currentCoords.lng]} icon={createDriverIcon(color, isSelected, rotation)} zIndexOffset={isSelected ? 2000 : 500}>
                                 <Popup><div className="font-bold">{driver.name}</div></Popup>
                             </Marker>
-                            {driver.route.map((stop, stopIdx) => (
-                                <Marker key={`${driver.id}-stop-${stop.id}`} position={[stop.coords.lat, stop.coords.lng]} icon={createNumberedIcon(stopIdx + 1, isSelected && stopIdx === 0)} zIndexOffset={isSelected ? 1500 : 100} />
-                            ))}
+                            {/* Marcadores numerados apenas para as paradas subsequentes (2, 3...) a atual (1) já tem o pulso */}
+                            {driver.route.map((stop, stopIdx) => {
+                                if (stopIdx === 0 && isSelected) return null; // Não desenha número na primeira parada se estiver focado (já tem pulso)
+                                return <Marker key={`${driver.id}-stop-${stop.id}`} position={[stop.coords.lat, stop.coords.lng]} icon={createNumberedIcon(stopIdx + 1, false)} zIndexOffset={isSelected ? 1500 : 100} />
+                            })}
                         </React.Fragment>
                     );
                 })}
