@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents 
 import L from 'leaflet';
 import { DeliveryLocation, DriverState } from '../types';
 import { ITAJAI_CENTER } from '../constants';
-import { Navigation as NavIcon, LocateFixed } from 'lucide-react'; // Ícones para o botão de recentralizar
+import { Navigation as NavIcon, LocateFixed } from 'lucide-react';
 
 // --- FUNÇÃO AUXILIAR: CALCULAR ROTAÇÃO (BEARING) ---
 const calculateBearing = (startLat: number, startLng: number, destLat: number, destLng: number) => {
@@ -19,7 +19,7 @@ const calculateBearing = (startLat: number, startLng: number, destLat: number, d
 
     let brng = Math.atan2(y, x);
     brng = (brng * 180) / Math.PI;
-    return (brng + 360) % 360; // Normaliza para 0-360
+    return (brng + 360) % 360;
 };
 
 // --- ÍCONES ---
@@ -39,7 +39,6 @@ const createNumberedIcon = (number: number, isNext: boolean) => {
     });
 };
 
-// Ícone do Motorista com ROTAÇÃO
 const createDriverIcon = (colorHex: string, isSelected: boolean, rotation: number) => {
     return new L.DivIcon({
         className: 'driver-marker',
@@ -52,59 +51,72 @@ const createDriverIcon = (colorHex: string, isSelected: boolean, rotation: numbe
                 </div>
             </div>
         `,
-        iconSize: [48, 48], iconAnchor: [24, 24], // Centralizado
+        iconSize: [48, 48], iconAnchor: [24, 24],
     });
 };
 
-// --- COMPONENTE: ROTA INTELIGENTE (OSRM) ---
+// --- COMPONENTE: ROTA INTELIGENTE OTIMIZADA ---
+// 1. Desenha uma linha reta simples (dinâmica) do Carro até a Parada 1
+// 2. Busca na API (estática) a rota da Parada 1 até a Parada N (só chama quando a rota muda)
 const SmartRoutePolyline: React.FC<{ driverPos: [number, number], stops: DeliveryLocation[], color: string, isSelected: boolean }> = ({ driverPos, stops, color, isSelected }) => {
-    const [routePositions, setRoutePositions] = useState<[number, number][]>([]);
+    const [staticRoutePositions, setStaticRoutePositions] = useState<[number, number][]>([]);
     
+    // Efeito para buscar rota da API (Apenas quando a lista de STOPS muda, ignora movimento do GPS)
     useEffect(() => {
-        if (!stops || stops.length === 0) { setRoutePositions([]); return; }
-        if (!isSelected) { setRoutePositions([driverPos, ...stops.map(s => [s.coords.lat, s.coords.lng] as [number, number])]); return; }
+        if (!stops || stops.length < 2) { 
+            setStaticRoutePositions([]); 
+            return; 
+        }
+        
+        // Se não estiver focado, não gasta API
+        if (!isSelected) {
+            setStaticRoutePositions(stops.map(s => [s.coords.lat, s.coords.lng]));
+            return;
+        }
 
         const fetchRoute = async () => {
             try {
-                const coordsString = `${driverPos[1]},${driverPos[0]};` + stops.map(s => `${s.coords.lng},${s.coords.lat}`).join(';');
+                // Rota entre as paradas (ignora o motorista aqui para economizar API)
+                const coordsString = stops.map(s => `${s.coords.lng},${s.coords.lat}`).join(';');
                 const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson`);
                 const data = await response.json();
                 if (data.routes?.[0]) {
-                    setRoutePositions(data.routes[0].geometry.coordinates.map((c: number[]) => [c[1], c[0]]));
+                    setStaticRoutePositions(data.routes[0].geometry.coordinates.map((c: number[]) => [c[1], c[0]]));
                 }
             } catch (e) {
-                setRoutePositions([driverPos, ...stops.map(s => [s.coords.lat, s.coords.lng] as [number, number])]);
+                // Fallback linha reta
+                setStaticRoutePositions(stops.map(s => [s.coords.lat, s.coords.lng]));
             }
         };
         fetchRoute();
-    }, [driverPos, stops, isSelected]);
+    }, [stops, isSelected]); // REMOVIDO driverPos das dependências!
 
-    if (routePositions.length < 2) return null;
+    if (!isSelected || stops.length === 0) return null;
 
     return (
         <>
-            <Polyline positions={routePositions} pathOptions={{ color: 'white', weight: isSelected ? 8 : 0, opacity: 0.8, lineCap: 'round', lineJoin: 'round' }} />
-            <Polyline positions={routePositions} pathOptions={{ color, weight: isSelected ? 5 : 3, opacity: isSelected ? 1 : 0.6, dashArray: isSelected ? undefined : '5, 10' }} />
+            {/* 1. Link Dinâmico: Linha Tracejada do Carro até a Primeira Parada (Atualiza 60fps) */}
+            <Polyline 
+                positions={[driverPos, [stops[0].coords.lat, stops[0].coords.lng]]} 
+                pathOptions={{ color: color, weight: 3, opacity: 0.8, dashArray: '10, 10', className: 'animate-pulse' }} 
+            />
+
+            {/* 2. Rota Estática: Caminho real entre as paradas (Cacheado) */}
+            {staticRoutePositions.length > 0 && (
+                <>
+                    <Polyline positions={staticRoutePositions} pathOptions={{ color: 'white', weight: 8, opacity: 0.8, lineCap: 'round', lineJoin: 'round' }} />
+                    <Polyline positions={staticRoutePositions} pathOptions={{ color, weight: 5, opacity: 1 }} />
+                </>
+            )}
         </>
     );
 };
 
-// --- COMPONENTE: CONTROLADOR DO MAPA (FOLLOW MODE) ---
+// --- COMPONENTE: CONTROLADOR DO MAPA ---
 const MapController: React.FC<{ center: [number, number], zoom: number, driverId?: string, isFollowing: boolean, onDragStart: () => void }> = ({ center, zoom, driverId, isFollowing, onDragStart }) => {
     const map = useMap();
-    
-    // Detecta se o usuário arrastou o mapa
-    useMapEvents({
-        dragstart: () => onDragStart(),
-        touchstart: () => onDragStart() 
-    });
-
-    useEffect(() => {
-        if (isFollowing) {
-            map.flyTo(center, zoom, { duration: 1.5, easeLinearity: 0.25 });
-        }
-    }, [center, zoom, map, isFollowing]);
-
+    useMapEvents({ dragstart: onDragStart, touchstart: onDragStart });
+    useEffect(() => { if (isFollowing) map.flyTo(center, zoom, { duration: 1.5, easeLinearity: 0.25 }); }, [center, zoom, map, isFollowing]);
     return null;
 };
 
@@ -120,56 +132,39 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
     const centerPos: [number, number] = activeDriver ? [activeDriver.currentCoords.lat, activeDriver.currentCoords.lng] : [ITAJAI_CENTER.lat, ITAJAI_CENTER.lng];
     const getDriverColor = (index: number) => ['#2563eb', '#f97316', '#16a34a', '#dc2626', '#9333ea', '#db2777'][index % 6];
     
-    // Estado do Bearing (Rotação) e "Seguir Motorista"
     const [driverBearings, setDriverBearings] = useState<Record<string, number>>({});
     const prevCoordsRef = useRef<Record<string, {lat: number, lng: number}>>({});
     const [isFollowing, setIsFollowing] = useState(true);
 
-    // Atualiza Rotação quando motoristas se movem
     useEffect(() => {
         const newBearings = { ...driverBearings };
         let changed = false;
-
         drivers.forEach(driver => {
             const prev = prevCoordsRef.current[driver.id];
             if (prev) {
                 const dist = Math.sqrt(Math.pow(driver.currentCoords.lat - prev.lat, 2) + Math.pow(driver.currentCoords.lng - prev.lng, 2));
-                // Só atualiza rotação se moveu uma distância mínima (evita tremedeira do GPS parado)
                 if (dist > 0.0001) { 
                     const bearing = calculateBearing(prev.lat, prev.lng, driver.currentCoords.lat, driver.currentCoords.lng);
                     newBearings[driver.id] = bearing;
                     changed = true;
                 }
-            } else {
-                newBearings[driver.id] = 0; // Padrão Norte
-            }
+            } else { newBearings[driver.id] = 0; }
             prevCoordsRef.current[driver.id] = driver.currentCoords;
         });
-
         if (changed) setDriverBearings(newBearings);
     }, [drivers]);
 
-    // Reseta o Follow se trocar de motorista selecionado
     useEffect(() => { setIsFollowing(true); }, [currentDriverId]);
-
-    // Ajuste de Layout
+    
     const mapRef = useRef<L.Map>(null);
     useEffect(() => { if (mapRef.current) setTimeout(() => mapRef.current?.invalidateSize(), 400); }, [isLayoutCompact]);
 
     return (
         <div className="w-full h-full relative overflow-hidden bg-slate-200">
             <MapContainer ref={mapRef} center={ITAJAI_CENTER} zoom={13} className="w-full h-full" zoomControl={false} scrollWheelZoom={true}>
-                <MapController 
-                    center={centerPos} 
-                    zoom={16} 
-                    driverId={currentDriverId} 
-                    isFollowing={isFollowing && !!activeDriver}
-                    onDragStart={() => setIsFollowing(false)}
-                />
-                
+                <MapController center={centerPos} zoom={16} driverId={currentDriverId} isFollowing={isFollowing && !!activeDriver} onDragStart={() => setIsFollowing(false)} />
                 <TileLayer attribution='&copy; CARTO' url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
                 
-                {/* Locais */}
                 {locations.map(loc => {
                     const isNextStop = activeDriver?.route[0]?.id === loc.id;
                     return (
@@ -179,20 +174,16 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
                     );
                 })}
 
-                {/* Motoristas */}
                 {drivers.map((driver, index) => {
                     const isSelected = driver.id === currentDriverId;
                     const color = getDriverColor(index);
                     const rotation = driverBearings[driver.id] || 0;
-
                     return (
                         <React.Fragment key={driver.id}>
                             <SmartRoutePolyline driverPos={[driver.currentCoords.lat, driver.currentCoords.lng]} stops={driver.route} color={color} isSelected={isSelected} />
-                            
                             <Marker position={[driver.currentCoords.lat, driver.currentCoords.lng]} icon={createDriverIcon(color, isSelected, rotation)} zIndexOffset={isSelected ? 2000 : 500}>
                                 <Popup><div className="font-bold">{driver.name}</div></Popup>
                             </Marker>
-
                             {driver.route.map((stop, stopIdx) => (
                                 <Marker key={`${driver.id}-stop-${stop.id}`} position={[stop.coords.lat, stop.coords.lng]} icon={createNumberedIcon(stopIdx + 1, isSelected && stopIdx === 0)} zIndexOffset={isSelected ? 1500 : 100} />
                             ))}
@@ -200,13 +191,8 @@ export const LeafletMap: React.FC<MapProps> = ({ locations, drivers, currentDriv
                     );
                 })}
             </MapContainer>
-
-            {/* BOTÃO FLUTUANTE DE RECENTRALIZAR (Estilo Uber) */}
             {activeDriver && !isFollowing && (
-                <button 
-                    onClick={() => setIsFollowing(true)} 
-                    className="absolute bottom-6 right-6 z-[400] bg-white text-slate-700 p-3 rounded-full shadow-xl border border-slate-100 active:scale-95 transition-all flex items-center gap-2 font-bold text-xs animate-in fade-in slide-in-from-bottom-4"
-                >
+                <button onClick={() => setIsFollowing(true)} className="absolute bottom-6 right-6 z-[400] bg-white text-slate-700 p-3 rounded-full shadow-xl border border-slate-100 active:scale-95 transition-all flex items-center gap-2 font-bold text-xs animate-in fade-in slide-in-from-bottom-4">
                     <LocateFixed className="w-4 h-4 text-emerald-600" /> Recentralizar
                 </button>
             )}
