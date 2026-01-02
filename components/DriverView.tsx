@@ -1,10 +1,10 @@
 // NOME DO ARQUIVO: components/DriverView.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DeliveryLocation, DriverState, DeliveryRecord, RouteHistory } from '../types';
 import { LOCATIONS_DB } from '../constants';
 import { optimizeRouteOrder, getRouteBriefingAudio } from '../services/geminiService';
 import { saveRouteToHistoryDB, updateLocationStatusInDB, updateDriverRouteInDB, updateDriverStatusInDB } from '../services/dbService';
-import { Truck, Navigation, CheckCircle, Circle, MapPin, Loader2, Volume2, ShieldAlert, Coffee, PlayCircle, Map as MapIcon, XCircle, CheckSquare, Siren } from 'lucide-react';
+import { Truck, Navigation, CheckCircle, Circle, MapPin, Loader2, Volume2, ShieldAlert, Coffee, PlayCircle, Map as MapIcon, XCircle, CheckSquare, Siren, MessageCircle } from 'lucide-react';
 import { H2Logo } from './Logo';
 
 interface DriverViewProps {
@@ -13,6 +13,18 @@ interface DriverViewProps {
     toggleStatus: () => void;
     completeDelivery: () => void;
 }
+
+// Função para calcular distância em km (Haversine Formula)
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371; // Raio da Terra em km
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+    const a = 
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+};
 
 export const DriverView: React.FC<DriverViewProps> = ({ 
     driverState, 
@@ -25,11 +37,31 @@ export const DriverView: React.FC<DriverViewProps> = ({
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [completedRecords, setCompletedRecords] = useState<DeliveryRecord[]>([]);
     
+    // Geofencing: Detectar chegada
+    const [isNearby, setIsNearby] = useState(false);
+    
     // Modal
     const [showFinishModal, setShowFinishModal] = useState(false);
     const [finishStatus, setFinishStatus] = useState<'DELIVERED' | 'FAILED'>('DELIVERED');
     const [finishObs, setFinishObs] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Monitora a distância para o próximo ponto
+    useEffect(() => {
+        if (driverState.route.length > 0) {
+            const target = driverState.route[0];
+            const dist = calculateDistance(
+                driverState.currentCoords.lat, 
+                driverState.currentCoords.lng, 
+                target.coords.lat, 
+                target.coords.lng
+            );
+            // Se estiver a menos de 0.15 km (150 metros)
+            setIsNearby(dist < 0.15);
+        } else {
+            setIsNearby(false);
+        }
+    }, [driverState.currentCoords, driverState.route]);
 
     const openGoogleMapsRoute = () => {
         if (driverState.route.length === 0) return;
@@ -41,6 +73,14 @@ export const DriverView: React.FC<DriverViewProps> = ({
         window.open(url, '_blank');
     };
 
+    const openWhatsApp = () => {
+        const current = driverState.route[0];
+        if (!current || !current.phone) return alert("Telefone não cadastrado para este local.");
+        const cleanPhone = current.phone.replace(/\D/g, '');
+        const message = encodeURIComponent(`Olá, sou o entregador da H2 Brasil. Estou a caminho de ${current.name}.`);
+        window.open(`https://wa.me/55${cleanPhone}?text=${message}`, '_blank');
+    };
+
     const toggleSelection = (id: string) => {
         const newSet = new Set(selectedIds);
         if (newSet.has(id)) newSet.delete(id);
@@ -50,7 +90,7 @@ export const DriverView: React.FC<DriverViewProps> = ({
 
     const handlePanicButton = async () => {
         if (confirm("EMERGÊNCIA: Isso alertará a central. Confirmar?")) {
-            await updateDriverStatusInDB(driverState.id, 'EMERGENCY' as any); // Type cast for custom status
+            await updateDriverStatusInDB(driverState.id, 'EMERGENCY');
             alert("Alerta enviado para a central!");
         }
     };
@@ -60,7 +100,6 @@ export const DriverView: React.FC<DriverViewProps> = ({
         setIsOptimizing(true);
         setErrorMsg(null);
         setCompletedRecords([]); 
-        
         try {
             const selectedLocations = LOCATIONS_DB.filter(l => selectedIds.has(l.id));
             let orderedRoute = selectedLocations;
@@ -87,12 +126,8 @@ export const DriverView: React.FC<DriverViewProps> = ({
         };
         const updatedRecords = [...completedRecords, newRecord];
         
-        // Lógica de Salvamento com Fallback Offline
         try {
-            // Tenta salvar no Firebase
             await updateLocationStatusInDB(currentLocation.id, 'COMPLETED');
-            
-            // Se for a última, salva histórico
             if (driverState.route.length === 1) {
                 const historyItem: RouteHistory = {
                     id: `route-${Date.now()}`,
@@ -106,50 +141,23 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 await saveRouteToHistoryDB(historyItem);
                 setCompletedRecords([]);
             }
-
-            // Atualiza rota do motorista (remove a atual)
             const remainingRoute = driverState.route.slice(1);
             await updateDriverRouteInDB(driverState.id, remainingRoute);
-            
             setShowFinishModal(false);
-            // Atualiza localmente a UI via prop (optimistic update é feito no App.tsx via subscription, mas chamamos callback)
-            // completeDelivery() -> na verdade o updateDriverRouteInDB já vai disparar o listener no App.tsx
-            
         } catch (e) {
             console.error("Erro online, salvando offline:", e);
-            // SALVAMENTO OFFLINE
             const offlineQueue = JSON.parse(localStorage.getItem('OFFLINE_QUEUE') || '[]');
             offlineQueue.push({
                 type: 'COMPLETE_DELIVERY',
                 payload: {
-                    driverId: driverState.id,
-                    locationId: currentLocation.id,
-                    record: newRecord,
-                    remainingRoute: driverState.route.slice(1),
-                    isLast: driverState.route.length === 1,
-                    historyData: driverState.route.length === 1 ? {
-                        id: `route-${Date.now()}`,
-                        date: new Date().toISOString().split('T')[0],
-                        driverName: driverState.name,
-                        totalDeliveries: updatedRecords.filter(r => r.status === 'DELIVERED').length,
-                        totalFailures: updatedRecords.filter(r => r.status === 'FAILED').length,
-                        records: updatedRecords,
-                        status: 'COMPLETED'
-                    } : null
+                    driverId: driverState.id, locationId: currentLocation.id, record: newRecord, remainingRoute: driverState.route.slice(1), isLast: driverState.route.length === 1,
+                    historyData: driverState.route.length === 1 ? { id: `route-${Date.now()}`, date: new Date().toISOString().split('T')[0], driverName: driverState.name, totalDeliveries: updatedRecords.filter(r => r.status === 'DELIVERED').length, totalFailures: updatedRecords.filter(r => r.status === 'FAILED').length, records: updatedRecords, status: 'COMPLETED' } : null
                 }
             });
             localStorage.setItem('OFFLINE_QUEUE', JSON.stringify(offlineQueue));
-            alert("Sem internet. Dados salvos no dispositivo e serão enviados automaticamente quando a conexão voltar.");
+            alert("Sem internet. Dados salvos no dispositivo.");
             setShowFinishModal(false);
-            
-            // Força atualização visual local (hack para UX)
-            const remainingRoute = driverState.route.slice(1);
-            // Simula a remoção visualmente chamando a prop, embora o DB não tenha atualizado
-            if(remainingRoute.length < driverState.route.length) {
-               // Apenas fechamos o modal, o App.tsx não vai receber update do DB, 
-               // então idealmente deveríamos forçar um estado local, mas para MVP o alert basta.
-               window.location.reload(); // Solução drástica para limpar estado local offline no MVP
-            }
+            window.location.reload(); 
         } finally {
             setIsSubmitting(false);
             setFinishObs('');
@@ -199,23 +207,46 @@ export const DriverView: React.FC<DriverViewProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20 md:pb-4">
-                    <div className={`rounded-2xl p-5 shadow-xl relative overflow-hidden transition-all duration-500 ${isBreak ? 'bg-amber-500 text-white' : 'bg-slate-900 text-white'}`}>
+                    
+                    {/* CARD PRINCIPAL */}
+                    <div className={`rounded-2xl p-5 shadow-xl relative overflow-hidden transition-all duration-500 ${isNearby ? 'ring-4 ring-emerald-400 ring-offset-2' : ''} ${isBreak ? 'bg-amber-500 text-white' : 'bg-slate-900 text-white'}`}>
                         <div className="absolute top-0 right-0 p-4 opacity-10">{isBreak ? <Coffee className="w-20 h-20" /> : <Truck className="w-20 h-20" />}</div>
+                        
+                        {/* AVISO DE CHEGADA (GEOFENCING) */}
+                        {!isBreak && isNearby && (
+                            <div className="absolute top-0 left-0 right-0 bg-emerald-500 py-1 flex items-center justify-center gap-2 animate-pulse">
+                                <MapPin className="w-3 h-3 text-white fill-white" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-white">Você chegou ao local</span>
+                            </div>
+                        )}
+
                         {isBreak ? (
                             <div className="text-center py-4"><h3 className="text-2xl font-black uppercase tracking-widest mb-1">EM INTERVALO</h3><p className="text-white/80 text-sm mb-4">Monitoramento pausado.</p></div>
                         ) : (
-                            <>
+                            <div className={isNearby ? 'mt-4' : ''}>
                                 <h3 className="text-[10px] font-bold text-emerald-400 uppercase tracking-[0.2em] mb-2">Próxima Parada #1</h3>
                                 <p className="text-xl font-black mb-1 leading-tight">{currentTarget.name}</p>
                                 <p className="text-xs text-slate-400 mb-6 truncate">{currentTarget.address}</p>
-                                <button onClick={openGoogleMapsRoute} className="w-full mb-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"><Navigation className="w-4 h-4" /> Navegar com Google Maps</button>
-                            </>
+                                
+                                <div className="flex gap-2 mb-4">
+                                    <button onClick={openGoogleMapsRoute} className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
+                                        <Navigation className="w-4 h-4" /> Navegar
+                                    </button>
+                                    <button onClick={openWhatsApp} className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
+                                        <MessageCircle className="w-4 h-4" /> Contato
+                                    </button>
+                                </div>
+                            </div>
                         )}
                         <div className="grid grid-cols-2 gap-3 relative z-10">
                             <button onClick={toggleStatus} className={`py-4 rounded-xl font-bold text-sm transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95 ${isBreak ? 'bg-white text-amber-600 hover:bg-amber-50' : 'bg-amber-500 text-white hover:bg-amber-400'}`}>{isBreak ? <><PlayCircle className="w-4 h-4" /> Retornar</> : <><Coffee className="w-4 h-4" /> Intervalo</>}</button>
-                            <button onClick={() => setShowFinishModal(true)} disabled={isBreak} className="py-4 bg-white text-slate-900 disabled:opacity-50 disabled:bg-slate-200 rounded-xl font-bold text-sm shadow-lg active:scale-95">Concluir</button>
+                            {/* BOTÃO CONCLUIR COM DESTAQUE QUANDO PERTO */}
+                            <button onClick={() => setShowFinishModal(true)} disabled={isBreak} className={`py-4 rounded-xl font-bold text-sm shadow-lg active:scale-95 transition-all ${isNearby && !isBreak ? 'bg-emerald-500 text-white animate-bounce shadow-emerald-500/50' : 'bg-white text-slate-900 disabled:opacity-50 disabled:bg-slate-200'}`}>
+                                {isNearby && !isBreak ? 'Cheguei / Concluir' : 'Concluir'}
+                            </button>
                         </div>
                     </div>
+                    
                     {!isBreak && driverState.route.map((loc, idx) => (
                         <div key={loc.id} className="flex items-center gap-4 bg-white border border-slate-100 p-3 rounded-xl">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${idx === 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-50 text-slate-300'}`}>{idx + 1}</div>
