@@ -42,12 +42,14 @@ export const DriverView: React.FC<DriverViewProps> = ({
         const destination = `${lastStop.coords.lat},${lastStop.coords.lng}`;
         
         // Waypoints (Paradas no meio do caminho)
+        // A API de URL suporta waypoints separados por pipe '|'
         const waypoints = driverState.route.slice(0, -1)
             .map(loc => `${loc.coords.lat},${loc.coords.lng}`)
             .join('|');
             
-        // URL Oficial da API Google Maps
-        // Corrigido: Adicionado $ antes das variáveis e usado a URL padrão https
+        // URL Oficial da API Google Maps para Direções
+        // api=1 garante o formato correto
+        // travelmode=driving força modo carro
         const url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
         
         window.open(url, '_blank');
