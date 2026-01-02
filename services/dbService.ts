@@ -161,3 +161,20 @@ export const updateLocationStatusInDB = async (locationId: string, status: 'PEND
     if (!isConfigured) return;
     try { await updateDoc(doc(db, LOCATIONS_COLLECTION, locationId), { status }); } catch (e) { }
 };
+
+// --- NOVAS FUNÇÕES PARA GESTÃO DE LOCAIS ---
+
+export const addLocationToDB = async (location: DeliveryLocation) => {
+    if (!isConfigured) return;
+    try {
+        // Usa o ID do objeto ou cria um novo se não existir
+        const docId = location.id || `loc-${Date.now()}`;
+        const data = sanitizeForFirestore({ ...location, id: docId });
+        await setDoc(doc(db, LOCATIONS_COLLECTION, docId), data);
+    } catch (e) { throw e; }
+};
+
+export const deleteLocationFromDB = async (locationId: string) => {
+    if (!isConfigured) return;
+    try { await deleteDoc(doc(db, LOCATIONS_COLLECTION, locationId)); } catch (e) { throw e; }
+};
